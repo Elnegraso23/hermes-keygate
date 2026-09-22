@@ -204,37 +204,19 @@ def register(ctx):
         except Exception as exc:
             return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
 
-        # 2) Origin binding: entry URL must match requested origin.
-        entry_url = kg.show_field(db, kf, alias, "url") or ""
-        if entry_url and origin.lower() not in entry_url.lower() \
-                and entry_url.lower() not in origin.lower():
-            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                               "origin": kg.redact_origin(origin), "decision": "domain-mismatch"})
-            return json.dumps({"success": False,
-                               "error": "domain mismatch — vault URL != tab origin"})
-
-        # 3) Resolve server-side (process memory only).
-        pw_b = bytearray((kg.show_field(db, kf, alias, "password") or "").encode())
-        un = kg.show_field(db, kf, alias, "username") or ""
-        if not pw_b:
-            return json.dumps({"success": False, "error": "no password for alias"})
-
-        # 4) Fill over supervised CDP WebSocket (never argv). Reuse native vault
-        # fill when available; otherwise refuse rather than leak via argv.
-        filled = _cdp_fill(kw.get("task_id") or params.get("task_id") or "cli",
-                           un, pw_b, origin)
-        kg.zeroize(pw_b)
-        del pw_b
-        otp = kg.show_field(db, kf, alias, "totp")
-        totp_ok = False
-        if otp and filled.get("success"):
-            totp_ok = bool(_cdp_fill_totp(kw.get("task_id") or "cli", otp).get("success"))
-            kg.zeroize(bytearray(otp.encode()))
+        # 2-4) Blind fill through the native secret-safe path (exact-origin
+        # binding, inspect+classify, CDP WebSocket only, redaction boundary).
+        # Username also fills server-side so the full identifier never enters
+        # the conversation (strict redaction).
+        filled = _native_keygate_fill(kw.get("task_id") or params.get("task_id") or "default",
+                                      alias, origin, db, kf)
         kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                           "origin": kg.redact_origin(origin), "decision": "allow",
-                           "filled": filled.get("filled_fields", 0), "totp": totp_ok})
+                           "origin": kg.redact_origin(origin),
+                           "decision": "allow" if filled.get("success") else filled.get("error_type", "refused"),
+                           "filled": filled.get("filled_fields", 0),
+                           "totp": filled.get("totp_filled", False)})
         out = {"success": bool(filled.get("success")), "filled_fields": filled.get("filled_fields", 0),
-               "origin": origin, "totp_filled": totp_ok}
+               "origin": filled.get("origin", origin), "totp_filled": filled.get("totp_filled", False)}
         if not out["success"]:
             out["error"] = filled.get("error", "fill refused")
         return json.dumps(out)
@@ -305,54 +287,140 @@ def register(ctx):
         handler=h_sess_inv)
 
 
-def _cdp_fill(task_id: str, username: str, pw_b: bytearray, origin: str) -> dict:
-    """Server-side fill over supervisor CDP WebSocket. Secret bytes travel only
-    inside the CDP message, never argv/logs/results. Falls back to refusal."""
-    try:
-        from tools.browser_supervisor import SUPERVISOR_REGISTRY
-        sup = SUPERVISOR_REGISTRY.get(task_id)
-        if sup is None:
-            return {"success": False, "error": "no supervised browser session — open Hermes browser first",
-                    "filled_fields": 0}
-        cur = sup.evaluate_runtime("JSON.stringify({o: location.origin})")
-        page_origin = ""
-        try:
-            page_origin = json.loads(cur.get("result") or "{}").get("o", "")
-        except Exception:
-            page_origin = ""
-        if origin.lower() not in page_origin.lower() and page_origin.lower() not in origin.lower():
-            return {"success": False, "error": f"page origin {page_origin!r} != {origin!r}",
-                    "filled_fields": 0}
-        # NOTE: real fill uses the supervisor's secret-safe runtime call
-        # (same path as browser_vault_fill). This thin adapter delegates to it
-        # when present so secret bytes never touch argv.
-        fill = getattr(sup, "fill_login", None)
-        if callable(fill):
-            password = bytes(pw_b).decode("utf-8", errors="replace")
-            try:
-                r = fill(username=username, password=password, origin=origin)
-            finally:
-                password = ""
-            if isinstance(r, dict):
-                return {"success": bool(r.get("ok", True)),
-                        "filled_fields": int(r.get("filled_fields", 2))}
-            return {"success": True, "filled_fields": 2}
-        return {"success": False, "filled_fields": 0,
-                "error": "supervisor has no secret-safe fill — refusing rather than argv leak"}
-    except Exception as exc:
-        return {"success": False, "filled_fields": 0, "error": str(exc)[:200]}
+def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str) -> dict:
+    """Blind fill through Hermes' native secret-safe machinery.
 
+    Mirrors tools.browser_vault_fill but resolves user/pass/TOTP from the
+    operative KeePassXC DB instead of a LoginBackend:
+    - exact-origin binding (vault URL == requested origin == page origin,
+      re-asserted inside the fill script against TOCTOU)
+    - inspect + classify page controls; identifier + password (+TOTP) filled
+      via supervisor CDP WebSocket only (never argv)
+    - register_vault_redaction_value BEFORE touching the page; errors scrubbed
+    Returns {success, filled_fields, origin, totp_filled} — never secrets.
+    """
+    import secrets as _secrets
+    from agent.redact import register_vault_redaction_value
+    from agent.vault_login_classifier import (
+        LoginControl, build_fill_js, build_inspection_js, build_otp_fills,
+        classify_login_control, classify_otp_controls, select_password_fill)
+    from agent.vault_store import normalize_origin, scrub_secret_from_text
+    from tools.browser_vault_tool import (
+        _current_page_origin, _eval_js, _eval_js_secret,
+        _focus_bound_origin, _parse_json_result)
 
-def _cdp_fill_totp(task_id: str, code: str) -> dict:
+    entry_url = kg.show_field(db, kf, alias, "url") or ""
     try:
-        from tools.browser_supervisor import SUPERVISOR_REGISTRY
-        sup = SUPERVISOR_REGISTRY.get(task_id)
-        if sup is None:
-            return {"success": False}
-        fill = getattr(sup, "fill_totp", None)
-        if callable(fill):
-            r = fill(code=code)
-            return {"success": bool((r or {}).get("ok", True))}
-        return {"success": False}
+        bound = normalize_origin(entry_url) if entry_url else ""
     except Exception:
-        return {"success": False}
+        bound = ""
+    if bound and origin.lower() not in bound.lower() and bound.lower() not in origin.lower():
+        return {"success": False, "filled_fields": 0, "origin": origin,
+                "error_type": "domain_mismatch",
+                "error": "vault URL != requested origin — refused"}
+    allowed = [bound] if bound else [origin]
+
+    page_origin = None
+    for candidate in allowed:
+        try:
+            page_origin = _focus_bound_origin(task_id, candidate, "login")
+        except Exception:
+            page_origin = None
+        if page_origin:
+            break
+    try:
+        page_origin = page_origin or _current_page_origin(task_id)
+    except Exception as exc:
+        return {"success": False, "filled_fields": 0, "origin": origin, "error": str(exc)[:200]}
+    if not page_origin:
+        return {"success": False, "filled_fields": 0, "origin": origin,
+                "error": "no page open — navigate to the login page first"}
+    if page_origin not in allowed:
+        return {"success": False, "filled_fields": 0, "origin": origin,
+                "error_type": "origin_mismatch",
+                "error": f"page {page_origin!r} != bound {', '.join(allowed)} — refused"}
+
+    username = kg.show_field(db, kf, alias, "username") or ""
+    pw_raw = kg.show_field(db, kf, alias, "password") or ""
+    if not pw_raw:
+        return {"success": False, "filled_fields": 0, "origin": page_origin,
+                "error": "no password for alias"}
+    pw_b = bytearray(pw_raw.encode("utf-8"))
+    pw_raw = ""
+    secret = {"password": bytes(pw_b).decode("utf-8", errors="replace"),
+              "username": username}
+
+    try:
+        nonce = _secrets.token_hex(8)
+        inspect = _eval_js(task_id, build_inspection_js(nonce))
+        if not inspect.get("success"):
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": f"inspect failed: {inspect.get('error', '')[:150]}"}
+        raw = _parse_json_result(inspect.get("result"))
+        if isinstance(raw, str):
+            raw = _parse_json_result(raw)
+        if not isinstance(raw, list):
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": "no usable controls on page"}
+        classified = [c for c in
+                      (classify_login_control(LoginControl.from_dict(r)) for r in raw
+                       if isinstance(r, dict)) if c is not None]
+        if not classified:
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": "no login fields found"}
+        fills = select_password_fill(classified, secret["password"])
+        if username:
+            ids = [c for c in classified if c.token in ("username", "email", "tel")]
+            if ids:
+                best = sorted(ids, key=lambda c: (-c.score, c.control.index))[0]
+                fills = [{"index": best.control.index, "token": best.token,
+                          "value": username}] + fills
+        if not fills:
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": "no fillable field matched"}
+
+        register_vault_redaction_value(secret["password"])
+        if username:
+            register_vault_redaction_value(username)
+        try:
+            fr = _eval_js_secret(task_id, build_fill_js(fills, expected_origin=page_origin, nonce=nonce))
+        except Exception as exc:
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": scrub_secret_from_text(str(exc), secret)}
+        if not fr.get("success"):
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error": scrub_secret_from_text(str(fr.get("error") or "fill failed"), secret)}
+        parsed = _parse_json_result(fr.get("result"))
+        if isinstance(parsed, str):
+            parsed = _parse_json_result(parsed)
+        if isinstance(parsed, dict) and parsed.get("refused") == "origin_changed":
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error_type": "origin_changed",
+                    "error": "page navigated away before fill — nothing written"}
+        filled = int(parsed.get("filled", 0)) if isinstance(parsed, dict) else 0
+
+        totp_filled = False
+        otp_code = kg.show_field(db, kf, alias, "totp")
+        if otp_code and filled:
+            otp_controls = classify_otp_controls(
+                [LoginControl.from_dict(r) for r in raw if isinstance(r, dict)])
+            otp_fills = build_otp_fills(otp_controls, otp_code) if otp_controls else []
+            if otp_fills:
+                register_vault_redaction_value(otp_code)
+                try:
+                    or_ = _eval_js_secret(task_id, build_fill_js(otp_fills, expected_origin=page_origin,
+                                                                 nonce=nonce))
+                    op = _parse_json_result(or_.get("result"))
+                    if isinstance(op, str):
+                        op = _parse_json_result(op)
+                    totp_filled = bool(or_.get("success") and isinstance(op, dict)
+                                       and int(op.get("filled", 0)) > 0)
+                except Exception:
+                    totp_filled = False
+            kg.zeroize(bytearray(otp_code.encode()))
+        return {"success": bool(filled), "filled_fields": filled,
+                "origin": page_origin, "totp_filled": totp_filled}
+    finally:
+        kg.zeroize(pw_b)
+        secret["password"] = ""
+        secret["username"] = ""
