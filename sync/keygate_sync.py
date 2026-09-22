@@ -184,7 +184,11 @@ class Handler(BaseHTTPRequestHandler):
         db, kf, token, _b, _p, _k = self._cfg()
         url = urlparse(self.path)
         if url.path == "/":
-            if not self._need_auth(token):
+            # Public shell on purpose: browsers can't send Authorization headers
+            # on plain navigation. The page holds zero secrets; it prompts for
+            # the token and calls /api/* with it (those stay Bearer-gated).
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
                 return
             body = INDEX_HTML.encode()
             self.send_response(200)
