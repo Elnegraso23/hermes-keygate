@@ -1,0 +1,18 @@
+#!/bin/bash
+# keygate-push: envía tu hermes.kdbx local por croc (fallback cuando no hay web/Tailscale).
+# NUNCA envía el .key: rehúsa cualquier path *.key aunque se lo pidas.
+# Uso: keygate-push [--dry-run] [ruta.db]
+set -euo pipefail
+DB="${1:-${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}}"
+[[ "${1:-}" == "--dry-run" ]] && { DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"; DRY=1; } || DRY=0
+case "$DB" in *.key) echo "REFUSED: jamás se transfiere el .key" >&2; exit 2;; esac
+command -v croc >/dev/null || { echo "instala croc primero: sudo apt install croc" >&2; exit 2; }
+[ -f "$DB" ] || { echo "no existe: $DB" >&2; exit 2; }
+command -v keepassxc-cli >/dev/null || { echo "falta keepassxc-cli" >&2; exit 2; }
+echo "== keygate-push =="
+sha256sum "$DB" | awk '{print "sha256:", $1}'
+ls -la "$DB" | awk '{print "size:", $5, $NF}'
+if [ "$DRY" = 1 ]; then echo "(dry-run: no se envía nada)"; exit 0; fi
+echo "-- ejecuta en el host Hermes: keygate-pull <CODIGO>"
+echo "-- (relay público solo como fallback: el archivo viaja cifrado E2E + ya es ciphertext por el keyfile)"
+croc send "$DB"

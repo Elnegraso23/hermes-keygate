@@ -86,6 +86,16 @@ def cfg_paths(cfg: dict) -> Tuple[str, str]:
 
 # ---------------------------------------------------------------- keepass ---
 
+_TRASH_HINTS = ("recycl", "trash", "papelera", "corbeille", "mull", "müll",
+                "cestino", "lixeira", "prullenbak", "papirkurv", "kosz")
+
+
+def is_trash_path(entry: str) -> bool:
+    """True when the entry lives under KeePassXC's recycle bin (any locale).
+    `rm` moves there instead of hard-deleting; blind tools must ignore it."""
+    low = (entry or "").lower()
+    return any(h in low for h in _TRASH_HINTS)
+
 _ENV_KEEP = ("PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMPDIR", "TEMP",
              "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR")
 
@@ -140,12 +150,24 @@ def list_entries(db: str, keyfile: str) -> List[str]:
     if p.returncode != 0:
         return []
     out = []
+    group = ""
     for line in (p.stdout or "").splitlines():
         t = line.strip()
         # Skip headers/placeholders (locale-dependent "[empty]"/"[vacío]").
-        if not t or t.startswith("Entries") or t == "/" or re.fullmatch(r"\[.*\]", t):
+        if not t or t.startswith("Entries") or re.fullmatch(r"\[.*\]", t):
             continue
-        out.append(t)
+        if t == "/":
+            group = ""
+            continue
+        if t.endswith("/"):  # group header: following entries hang under it
+            group = t
+            continue
+        full = f"{group}{t}" if group else t
+        # `rm` moves entries to the recycle bin instead of hard-deleting;
+        # `ls -R` still shows them — blind tools must ignore them.
+        if is_trash_path(full):
+            continue
+        out.append(full)
     return out
 
 
