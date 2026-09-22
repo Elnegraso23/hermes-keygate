@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.kdbx
+*.key
+*-audit.jsonl
+.pytest_cache/
+.venv/
+venv/

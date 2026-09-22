@@ -1,0 +1,21 @@
+# --- keygate (append to ~/.hermes/config.yaml; nothing secret here) ---
+plugins:
+  enabled:
+    - keygate
+
+approvals:
+  mode: manual
+  timeout: 60
+  cron_mode: deny
+  single_query_mode: deny
+
+secrets:
+  keepass:
+    enabled: true
+    db_path: "/home/black/Documentos/hermes.kdbx"
+    keyfile: "/home/black/.keepass-agent.key"
+    timeout_seconds: 30
+    env:
+      # EXAMPLES only — mapped refs, fetched at startup, never logged:
+      # GITHUB_TOKEN: "kpx://gh-agent-1/password"
+      # AWS_KEY: "kpx://aws-agent-2/password"
