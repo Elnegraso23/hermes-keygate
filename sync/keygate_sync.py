@@ -10,7 +10,6 @@ Endpoints (all require `Authorization: Bearer $KEYGATE_SYNC_TOKEN`):
   GET  /                        status page (counts only, no secrets)
   GET  /api/aliases             [{alias, hint}] redacted metadata
   POST /api/upload              multipart file field `db` -> validate/backup/atomic replace
-  POST /api/alias/remove        {"alias": ...} -> backup + delete entry
   GET  /api/onboarding/keyfile  ONE-TIME keyfile download, then 410 Gone forever
   GET  /api/audit?limit=N       last N audit lines (already redacted)
 
@@ -157,12 +156,6 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <pre id="out">Sin subidas todavía.</pre>
 </div>
 
-<h2>Baja de alias</h2>
-<div class="card"><div class="row">
-<input id="rmalias" placeholder="alias exacto (ej. sitio-agent-1)" style="flex:1;background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--txt)">
-<button class="danger" onclick="rmAlias()">Eliminar copia operativa</button>
-</div><div class="sub">Borra solo la copia de Hermes (recuperable desde backup/personal). Pide confirmación.</div></div>
-
 <h2>Onboarding del .key</h2>
 <div class="card"><div class="row">
 <span class="badge" id="obstate">…</span>
@@ -215,17 +208,6 @@ async function up() {
   document.getElementById('out').textContent = 'Subiendo…';
   const r = await fetch('/api/upload', {method: 'POST', headers: H, body: fd});
   document.getElementById('out').textContent = r.status + ' ' + await r.text();
-  load();
-}
-async function rmAlias() {
-  const a = document.getElementById('rmalias').value.trim();
-  if (!a) return alert('Escribe el alias exacto');
-  if (!confirm('Eliminar la copia operativa "' + a + '"? Recuperable desde backup/personal.')) return;
-  const r = await api('/api/alias/remove', {method: 'POST',
-    headers: Object.assign({'Content-Type': 'application/json'}, H),
-    body: JSON.stringify({alias: a})});
-  alert(r.status + ' ' + JSON.stringify(r.body));
-  document.getElementById('rmalias').value = '';
   load();
 }
 async function onboard() {
@@ -409,34 +391,6 @@ class Handler(BaseHTTPRequestHandler):
                         pass
             return
 
-        if url.path == "/api/alias/remove":
-            try:
-                alias = str(json.loads(body or b"{}").get("alias") or "").strip()
-            except Exception:
-                alias = ""
-            if not alias:
-                self._send(400, {"success": False, "error": "alias required"})
-                return
-            entries = kg.list_entries(db, kf)
-            match = next((e for e in entries if e.split("/")[-1] == alias), None)
-            if not match:
-                self._send(404, {"success": False, "error": "alias not found"})
-                return
-            try:
-                backup_db(db, keep)
-                p = subprocess.run(
-                    ["keepassxc-cli", "rm", "-k", kf, "--no-password", "-q",
-                     "--", db, match],
-                    stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
-                if p.returncode != 0:
-                    self._send(500, {"success": False, "error": "rm failed"})
-                    return
-                audit_ev(self._home(), {"ev": "sync", "action": "alias-remove",
-                                        "alias": kg.redact_label(alias)})
-                self._send(200, {"success": True, "removed": alias})
-            except Exception as exc:
-                self._send(500, {"success": False, "error": str(exc)[:200]})
-            return
         self._send(404, {"success": False, "error": "not found"})
 
     def _count_with(self, staging: str, kf: str) -> int:

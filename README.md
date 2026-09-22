@@ -64,8 +64,9 @@ python3 ~/hermes-keygate/sync/keygate_sync.py
 
 * `/` estado, `/api/aliases` hints redactados, `POST /api/upload` (valida
   KDBX+keyfile, rehúsa vacíos anti-wipe, backup+reemplazo atómico),
-  `POST /api/alias/remove`, `/api/onboarding/keyfile` (**una sola vez**,
-  luego 410), `/api/audit`. Todo con `Authorization: Bearer`.
+  `/api/onboarding/keyfile` (**una sola vez**, luego 410), `/api/audit`.
+  Todo con `Authorization: Bearer`. Bajas: se hacen borrando en tu KeePassXC
+  local y re-subiendo (reemplazo total, sin borrados remotos sueltos).
 * Onboarding inicial: descarga el `.key` **una vez** por la web (Tailscale),
   guárdalo 0600 en tu PC editor. Después ese endpoint muere.
 
@@ -78,9 +79,9 @@ python3 ~/hermes-keygate/sync/keygate_sync.py
 # reemplazo atómico y verificación. Rehúsa paths *.key siempre.
 ```
 
-**Telegram**: `keygate_alias_remove` (baja segura con approval: borra la
-copia operativa + backup; recuperable). `keygate_alias_add` **siempre
-rechazada por política**: las altas nunca salen del chat.
+**Telegram**: sin altas ni bajas desde el chat. `keygate_alias_add`
+**siempre rechazada por política** (las credenciales nunca salen del chat);
+los cambios se hacen en tu KeePassXC local + sync del `.kdbx`.
 
 ## Límites honestos
 
