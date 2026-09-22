@@ -17,7 +17,7 @@ else
 fi
 if [ ! -f "$DB" ]; then
   echo "-- creating operative DB (keyfile-only, no master password)"
-  keepassxc-cli db-create --set-key-file "$KF" --no-password "$DB"
+  keepassxc-cli db-create --set-key-file "$KF" "$DB"
   echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
 else
   echo "-- operative DB exists: $DB"
@@ -41,5 +41,5 @@ else
   echo "-- agent profile exists: $APROF"
 fi
 echo "-- verify non-interactive read (must print entry list or empty, never prompt):"
-timeout 10 keepassxc-cli --no-password -k "$KF" -q ls "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
+timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
 echo "== done =="

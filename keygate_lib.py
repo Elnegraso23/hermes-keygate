@@ -142,8 +142,10 @@ def list_entries(db: str, keyfile: str) -> List[str]:
     out = []
     for line in (p.stdout or "").splitlines():
         t = line.strip()
-        if t and not t.startswith("Entries") and t != "/":
-            out.append(t)
+        # Skip headers/placeholders (locale-dependent "[empty]"/"[vacío]").
+        if not t or t.startswith("Entries") or t == "/" or re.fullmatch(r"\[.*\]", t):
+            continue
+        out.append(t)
     return out
 
 
