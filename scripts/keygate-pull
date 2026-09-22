@@ -1,0 +1,32 @@
+#!/bin/bash
+# keygate-pull: recibe hermes.kdbx por croc en el HOST Hermes y lo instala.
+# Valida (abre con keyfile local, >=1 entrada) -> backup (retiene 5) -> reemplazo
+# atómico -> verificación. Falla cerrado conservando el actual.
+# Uso: keygate-pull <CODIGO> [--dry-run]
+set -euo pipefail
+CODE="${1:-}"; [[ "$CODE" == "--dry-run" ]] && { CODE="${2:-}"; DRY=1; } || DRY=0
+[ -n "$CODE" ] || { echo "uso: keygate-pull <CODIGO> [--dry-run]" >&2; exit 2; }
+DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
+KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
+KEEP="${KEYGATE_BACKUP_KEEP:-5}"
+command -v croc >/dev/null || { echo "instala croc primero: sudo apt install croc" >&2; exit 2; }
+[ -f "$KF" ] || { echo "falta keyfile local: $KF (nunca viaja por croc)" >&2; exit 2; }
+STAGEDIR="$(mktemp -d)"
+echo "== keygate-pull =="
+croc --yes --overwrite --out "$STAGEDIR" "$CODE" >/dev/null || { echo "recv falló" >&2; rm -rf "$STAGEDIR"; exit 2; }
+STAGE="$STAGEDIR/$(basename "$DB")"
+[ -f "$STAGE" ] || { echo "staging vacío, abortando (actual intacto)" >&2; rm -rf "$STAGEDIR"; exit 2; }
+head -c 4 "$STAGE" | grep -q $'\x03\xd9\xa2\x9a' || { echo "no es KDBX, abortando" >&2; rm -f "$STAGE"; exit 2; }
+N=$(timeout 30 keepassxc-cli ls -R -k "$KF" --no-password -q "$STAGE" < /dev/null | grep -vE 'recycl|trash|papelera|corbeille' | grep -vcE '^\s*(\[.*\]|Entries|/)?\s*$' || true)
+[ "$N" -ge 1 ] || { echo "staging abre pero trae 0 entradas — REFUSED anti-wipe" >&2; rm -rf "$STAGEDIR"; exit 2; }
+echo "staging OK: $N entradas, sha256: $(sha256sum "$STAGE" | cut -c1-16)…"
+if [ "$DRY" = 1 ]; then echo "(dry-run: no se reemplaza)"; rm -rf "$STAGEDIR"; exit 0; fi
+if [ -f "$DB" ]; then
+  BEFORE=$(timeout 30 keepassxc-cli ls -R -k "$KF" --no-password -q "$DB" < /dev/null | grep -vE 'recycl|trash|papelera|corbeille' | grep -vcE '^\s*(\[.*\]|Entries|/)?\s*$' || true)
+  cp -p "$DB" "$DB.$(date +%s).bak" && chmod 600 "$DB".*.bak 2>/dev/null || true
+  ls -t "$DB".*.bak 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+  echo "backup hecho (antes: $BEFORE entradas)"
+fi
+mv "$STAGE" "$DB" && chmod 600 "$DB"
+AFTER=$(timeout 30 keepassxc-cli ls -R -k "$KF" --no-password -q "$DB" < /dev/null | grep -vE 'recycl|trash|papelera|corbeille' | grep -vcE '^\s*(\[.*\]|Entries|/)?\s*$' || true)
+echo "reemplazo OK: ahora $AFTER entradas. keygate lo lee en la próxima llamada (sin reinicio)."

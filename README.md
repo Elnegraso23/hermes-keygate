@@ -45,6 +45,43 @@ grep -ri "password" ~/.hermes/plugins/keygate/__init__.py | grep -v "never\|pass
 tail ~/.hermes/keygate-audit.jsonl
 ```
 
+## 6. Sync al host Hermes (local + remoto)
+
+Edita siempre en tu KeePassXC local. El operativo viaja como ciphertext;
+el `.key` **jamás viaja** (vive quieto en cada máquina, 0600). keygate lee
+el archivo por llamada: el reemplazo aplica sin reiniciar.
+
+**Modo local** (misma máquina): no transfieras nada, edita en su sitio.
+
+**Modo remoto — primario: web `keygate-sync`** (solo Tailscale/LAN):
+
+```bash
+KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
+KEYGATE_SYNC_TOKEN='<token-largo>' KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
+python3 ~/hermes-keygate/sync/keygate_sync.py
+# NUNCA bindees 0.0.0.0 — llega por Tailscale. Sin token (>=16) no arranca.
+```
+
+* `/` estado, `/api/aliases` hints redactados, `POST /api/upload` (valida
+  KDBX+keyfile, rehúsa vacíos anti-wipe, backup+reemplazo atómico),
+  `POST /api/alias/remove`, `/api/onboarding/keyfile` (**una sola vez**,
+  luego 410), `/api/audit`. Todo con `Authorization: Bearer`.
+* Onboarding inicial: descarga el `.key` **una vez** por la web (Tailscale),
+  guárdalo 0600 en tu PC editor. Después ese endpoint muere.
+
+**Modo remoto — fallback: `croc`** (sin Tailscale/red especial):
+
+```bash
+# tu PC:  scripts/keygate-push [--dry-run]   → imprime sha256 + código
+# host:   ssh por tailscale → scripts/keygate-pull <CODIGO> [--dry-run]
+# pull valida (abre con keyfile, >=1 entrada), backup (retiene 5),
+# reemplazo atómico y verificación. Rehúsa paths *.key siempre.
+```
+
+**Telegram**: `keygate_alias_remove` (baja segura con approval: borra la
+copia operativa + backup; recuperable). `keygate_alias_add` **siempre
+rechazada por política**: las altas nunca salen del chat.
+
 ## Límites honestos
 
 - Plugin corre in-process (privilegio de agente): la garantía es "nunca al LLM/logs", no sandbox contra root/malware local.
