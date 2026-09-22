@@ -212,9 +212,14 @@ def register(ctx):
             timed_out = bool(ans.get("timed_out")) if isinstance(ans, dict) else False
             affirmed = ur in ("once", "session", "session 15min", "approve",
                               "yes", "y", "allow", "ok", "go")
+            # Forensics: record exactly what the approval surface returned, so a
+            # fill without a visible prompt can be diagnosed (never secrets —
+            # clarify payloads carry only question/choice/user_response text).
+            approval_evidence = {"approved_as": ur, "timed_out": timed_out}
             if timed_out or not affirmed or "deny" in ur:
                 kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                                   "origin": kg.redact_origin(origin), "decision": "deny"})
+                                   "origin": kg.redact_origin(origin), "decision": "deny",
+                                   **approval_evidence})
                 return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
         except Exception as exc:
             return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
@@ -229,7 +234,8 @@ def register(ctx):
                            "origin": kg.redact_origin(origin),
                            "decision": "allow" if filled.get("success") else filled.get("error_type", "refused"),
                            "filled": filled.get("filled_fields", 0),
-                           "totp": filled.get("totp_filled", False)})
+                           "totp": filled.get("totp_filled", False),
+                           **approval_evidence})
         out = {"success": bool(filled.get("success")), "filled_fields": filled.get("filled_fields", 0),
                "origin": filled.get("origin", origin), "totp_filled": filled.get("totp_filled", False)}
         if not out["success"]:
