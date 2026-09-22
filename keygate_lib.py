@@ -127,7 +127,7 @@ def db_locked(db: str, keyfile: str) -> bool:
     """Probe with `ls` (fast, non-interactive). Exit != 0 with keyfile-only
     DB almost always means locked/missing, never prompt (stdin is DEVNULL)."""
     try:
-        p = _run_kxc(["--no-password", "-k", keyfile, "-q", "ls", db])
+        p = _run_kxc(["ls", "-k", keyfile, "--no-password", "-q", db])
     except Exception:
         return True
     return p.returncode != 0
@@ -135,7 +135,7 @@ def db_locked(db: str, keyfile: str) -> bool:
 
 def list_entries(db: str, keyfile: str) -> List[str]:
     """Entry paths (titles/groups), metadata only. Empty when locked."""
-    p = _run_kxc(["--no-password", "-k", keyfile, "-q", "ls", "-R", db])
+    p = _run_kxc(["ls", "-R", "-k", keyfile, "--no-password", "-q", db])
     if p.returncode != 0:
         return []
     out = []
@@ -149,13 +149,13 @@ def list_entries(db: str, keyfile: str) -> List[str]:
 def show_field(db: str, keyfile: str, entry: str, field: str) -> Optional[str]:
     """Resolve ONE field server-side. field in {password, username, totp, url}."""
     if field == "totp":
-        args = ["--no-password", "-k", keyfile, "-q", "-t", "-s", "show", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-t", "-s", db, entry]
     elif field == "password":
-        args = ["--no-password", "-k", keyfile, "-q", "-s", "-a", "Password", "show", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-s", "-a", "Password", db, entry]
     elif field == "username":
-        args = ["--no-password", "-k", keyfile, "-q", "-a", "UserName", "show", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "UserName", db, entry]
     elif field == "url":
-        args = ["--no-password", "-k", keyfile, "-q", "-a", "URL", "show", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "URL", db, entry]
     else:
         return None
     try:
