@@ -1,0 +1,45 @@
+#!/bin/bash
+# keygate-setup: create operative vault (keyfile-only, NO master) + agent KeePassXC profile.
+# - Operative DB holds ONLY copies of what the agent may use (sacrificial).
+# - Personal DB is never referenced here.
+set -euo pipefail
+DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
+KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
+APROF="$HOME/.config/keepassxc-agent.ini"
+
+echo "== keygate setup =="
+if [ ! -f "$KF" ]; then
+  echo "-- creating keyfile $KF (0600)"
+  head -c 64 /dev/urandom | base64 > "$KF"
+  chmod 600 "$KF"
+else
+  echo "-- keyfile exists: $KF"
+fi
+if [ ! -f "$DB" ]; then
+  echo "-- creating operative DB (keyfile-only, no master password)"
+  keepassxc-cli db-create --set-key-file "$KF" --no-password "$DB"
+  echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
+else
+  echo "-- operative DB exists: $DB"
+fi
+mkdir -p "$(dirname "$APROF")"
+if [ ! -f "$APROF" ]; then
+  cat > "$APROF" <<EOF
+# Agent KeePassXC profile: long lock for operative DB only.
+# Launch: keepassxc --config $APROF $DB
+[General]
+ConfigVersion=2
+[Security]
+LockDatabaseIdle=true
+LockDatabaseIdleSeconds=28800
+LockDatabaseScreenLock=true
+ClearClipboardTimeout=10
+EOF
+  echo "-- agent profile written: $APROF"
+  echo "-- launch: keepassxc --config $APROF \"$DB\" &"
+else
+  echo "-- agent profile exists: $APROF"
+fi
+echo "-- verify non-interactive read (must print entry list or empty, never prompt):"
+timeout 10 keepassxc-cli --no-password -k "$KF" -q ls "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
+echo "== done =="

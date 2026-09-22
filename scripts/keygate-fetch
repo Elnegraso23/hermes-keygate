@@ -1,0 +1,20 @@
+#!/bin/sh
+# keygate-fetch: non-interactive single-field fetch for SecretSource mapped refs.
+# Usage: KEYGATE_DB=... KEYGATE_KEYFILE=... HERMES_SECRET_KEY=kpx://alias/field keygate-fetch
+# Prints ONLY the value on stdout (or nothing). stderr is for structured errors only.
+# Operative DB must be keyfile-only (--no-password): Hermes never sees a master password.
+set -eu
+REF="${HERMES_SECRET_KEY:-}"
+DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
+KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
+case "$REF" in kpx://*/*) ;; *) exit 1;; esac
+ALIAS="${REF#kpx://}"; ALIAS="${ALIAS%/*}"; FIELD="${REF##*/}"
+[ -f "$DB" ] || exit 1
+[ -f "$KF" ] || exit 1
+case "$FIELD" in
+  password) exec keepassxc-cli --no-password -k "$KF" -q -s -a Password show -- "$DB" "$ALIAS" ;;
+  username|user) exec keepassxc-cli --no-password -k "$KF" -q -a UserName show -- "$DB" "$ALIAS" ;;
+  totp) exec keepassxc-cli --no-password -k "$KF" -q -t -s show -- "$DB" "$ALIAS" ;;
+  url) exec keepassxc-cli --no-password -k "$KF" -q -a URL show -- "$DB" "$ALIAS" ;;
+  *) exit 1;;
+esac
