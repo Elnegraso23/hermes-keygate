@@ -95,39 +95,149 @@ def parse_multipart(body: bytes, boundary: bytes):
 
 
 INDEX_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
-<title>keygate-sync</title></head><body>
-<h1>keygate-sync (vault operativo)</h1>
-<p>Esta web solo mueve <b>ciphertext</b>: sube el .kdbx editado en tu KeePassXC local.
-Nunca escribas passwords aquí: no hay ningún campo para eso.</p>
-<p>Aliases: <span id="n">…</span> · DB: <span id="db">…</span></p>
-<ul id="aliases"></ul>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>keygate-sync</title>
+<style>
+:root{color-scheme:dark;--bg:#101418;--card:#1a2129;--line:#2a3440;--txt:#dbe4ee;
+--mut:#8fa1b5;--acc:#4cc38a;--warn:#e5b567;--bad:#ef6461;--btn:#2f6fed}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);
+font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:760px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#2f6fed,#4cc38a);
+display:flex;align-items:center;justify-content:center;font-size:20px}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:26px 0 10px;color:var(--mut);
+text-transform:uppercase;letter-spacing:.06em}
+.sub{color:var(--mut);font-size:13px;margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:10px 0}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.badge{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.badge.ok{color:var(--acc);border-color:var(--acc)}
+.badge.bad{color:var(--bad);border-color:var(--bad)}
+.alias{display:flex;justify-content:space-between;align-items:center;gap:10px;
+padding:9px 2px;border-bottom:1px solid var(--line)}
+.alias:last-child{border-bottom:0}
+.alias b{font-family:ui-monospace,monospace;font-size:14px}
+.alias small{color:var(--mut)}
+button{background:var(--btn);color:#fff;border:0;border-radius:8px;padding:9px 16px;
+font-size:14px;cursor:pointer}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);padding:6px 12px;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+.drop{border:2px dashed var(--line);border-radius:12px;padding:26px;text-align:center;
+color:var(--mut);cursor:pointer;transition:.15s}
+.drop.over{border-color:var(--acc);color:var(--acc)}
+pre{background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:10px;
+font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
+.audit{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut)}
+.topbar{display:flex;justify-content:flex-end;margin-bottom:4px}
+.hide{display:none}
+footer{color:var(--mut);font-size:12px;margin-top:26px}
+code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
+</style></head><body><div class="wrap">
+<div class="topbar"><button class="ghost" id="logout" onclick="logout()">Cerrar sesión</button></div>
+<header><div class="logo">🔑</div><div><h1>keygate-sync</h1>
+<div class="sub">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></header>
+
+<div class="card"><div class="row">
+<span class="badge" id="dbstate">…</span>
+<span class="badge" id="count">… aliases</span>
+<span style="flex:1"></span>
+<button class="ghost" onclick="load()">↻ Recargar</button>
+</div></div>
+
+<h2>Aliases</h2>
+<div class="card" id="aliases"><div class="sub">Cargando…</div></div>
+
 <h2>Subir nuevo hermes.kdbx</h2>
-<input type="file" id="f" accept=".kdbx"><button onclick="up()">Subir y reemplazar</button>
-<pre id="out"></pre>
+<div class="card">
+<div class="drop" id="drop">Arrastra el <code>.kdbx</code> aquí o haz clic para elegirlo
+<input type="file" id="f" accept=".kdbx" class="hide"></div>
+<div class="row" style="margin-top:10px"><button id="upbtn" onclick="up()">Subir y reemplazar</button></div>
+<pre id="out">Sin subidas todavía.</pre>
+</div>
+
+<h2>Baja de alias</h2>
+<div class="card"><div class="row">
+<input id="rmalias" placeholder="alias exacto (ej. sitio-agent-1)" style="flex:1;background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:9px;color:var(--txt)">
+<button class="danger" onclick="rmAlias()">Eliminar copia operativa</button>
+</div><div class="sub">Borra solo la copia de Hermes (recuperable desde backup/personal). Pide confirmación.</div></div>
+
+<h2>Onboarding del .key</h2>
+<div class="card"><div class="row">
+<span class="badge" id="obstate">…</span>
+<button class="ghost" id="obbtn" onclick="onboard()">Descargar .key (una sola vez)</button>
+</div><div class="sub">Guárdalo con permisos 600 en tu PC editor. Tras la primera descarga este botón muere para siempre.</div></div>
+
+<h2>Auditoría</h2>
+<div class="card audit" id="audit">…</div>
+
+<footer>keygate-sync · red local/Tailscale únicamente · todo cambio deja backup + audit</footer>
+</div>
 <script>
 const t = sessionStorage.getItem('kg_t') || prompt('Token de keygate-sync:') || '';
 sessionStorage.setItem('kg_t', t);
 const H = {'Authorization': 'Bearer ' + t};
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function logout(){ sessionStorage.removeItem('kg_t'); location.reload(); }
 async function api(p, o) {
   const r = await fetch(p, Object.assign({headers: H}, o));
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Token inválido'); }
+  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Token inválido, recarga e inténtalo de nuevo'); }
   return {status: r.status, body: j};
 }
-(async () => {
+async function load() {
   const r = await api('/api/aliases');
-  document.getElementById('n').textContent = (r.body.items || []).length;
-  document.getElementById('db').textContent = r.body.locked ? 'bloqueada' : 'ok';
-  document.getElementById('aliases').innerHTML = (r.body.items || [])
-    .map(i => `<li><b>${i.alias}</b> <small>${i.hint}</small></li>`).join('');
-})();
+  const b = r.body;
+  const ds = document.getElementById('dbstate');
+  ds.textContent = b.locked ? '🔒 DB bloqueada' : '🟢 DB ok';
+  ds.className = 'badge ' + (b.locked ? 'bad' : 'ok');
+  document.getElementById('count').textContent = (b.items || []).length + ' aliases';
+  document.getElementById('aliases').innerHTML = (b.items && b.items.length)
+    ? b.items.map(i => `<div class="alias"><div><b>${esc(i.alias)}</b><br><small>${esc(i.hint)}</small></div></div>`).join('')
+    : '<div class="sub">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
+  const a = await api('/api/audit?limit=8');
+  document.getElementById('audit').innerHTML = (a.body.lines || []).slice().reverse()
+    .map(l => `<div>${esc(l)}</div>`).join('') || 'Sin eventos.';
+  document.getElementById('obstate').textContent = '⚪ un solo uso (no se puede consultar sin consumirlo)';
+}
+const drop = document.getElementById('drop'), fi = document.getElementById('f');
+drop.onclick = () => fi.click();
+fi.onchange = () => drop.firstChild.textContent = 'Elegido: ' + (fi.files[0] ? fi.files[0].name : 'nada');
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.add('over');}));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
+drop.addEventListener('drop', ev => { fi.files = ev.dataTransfer.files; fi.onchange(); });
 async function up() {
-  const f = document.getElementById('f').files[0];
-  if (!f) return alert('elige el .kdbx');
+  const f = fi.files[0];
+  if (!f) return alert('Elige primero el .kdbx (clic o arrastra)');
+  if (!confirm('Reemplazar el operativo con ' + f.name + ' (' + f.size + ' bytes)? Se guarda backup.')) return;
   const fd = new FormData(); fd.append('db', f, 'hermes.kdbx');
+  document.getElementById('out').textContent = 'Subiendo…';
   const r = await fetch('/api/upload', {method: 'POST', headers: H, body: fd});
   document.getElementById('out').textContent = r.status + ' ' + await r.text();
+  load();
 }
+async function rmAlias() {
+  const a = document.getElementById('rmalias').value.trim();
+  if (!a) return alert('Escribe el alias exacto');
+  if (!confirm('Eliminar la copia operativa "' + a + '"? Recuperable desde backup/personal.')) return;
+  const r = await api('/api/alias/remove', {method: 'POST',
+    headers: Object.assign({'Content-Type': 'application/json'}, H),
+    body: JSON.stringify({alias: a})});
+  alert(r.status + ' ' + JSON.stringify(r.body));
+  document.getElementById('rmalias').value = '';
+  load();
+}
+async function onboard() {
+  if (!confirm('Descargar el .key UNA SOLA VEZ y deshabilitar este botón para siempre?')) return;
+  const r = await fetch('/api/onboarding/keyfile', {headers: H});
+  if (!r.ok) { alert('Ya servido o error: ' + r.status); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'keepass-agent.key'; a.click();
+  alert('Guardado. Ponle permisos 600 y desactiva si tu browser pregunta. Este botón ya no funcionará.');
+}
+load();
 </script></body></html>
 """
 
