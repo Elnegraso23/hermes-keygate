@@ -192,37 +192,30 @@ def register(ctx):
             return json.dumps({"success": False, "locked": True,
                                "error": "operative DB locked — unlock hermes.kdbx locally"})
 
-        # 1) Human approval via clarify (CLI/Telegram/Desktop surface).
-        # The secret is NOT in this prompt — only redacted hint.
-        # FAIL-CLOSED: inspect ONLY user_response + timed_out (the payload
-        # re-echoes our question text, so whole-blob substring checks would
-        # match "Allow" and fail open). Anything but an explicit affirmative
-        # denies.
+        # 1) Human approval on the active session's own surface
+        # (gateway buttons / CLI panel / Desktop) via the sanctioned
+        # elicitation API — the same path native vault uses for card fills.
+        # NEVER via registry-dispatched clarify: clarify is an inline tool
+        # whose UI callback is injected by the turn loop, so a registry
+        # dispatch runs it headless and it fails closed (approved_as "").
+        # FAIL-CLOSED: only "accept" proceeds; decline/cancel/timeout deny.
         try:
-            res = ctx.dispatch_tool("clarify", {
-                "questions": [{
-                    "question": (f"Allow Hermes to fill login {kg.redact_label(alias)} "
-                                 f"on {kg.redact_origin(origin)}?"),
-                    "choices": ["once", "session 15min", "deny"],
-                }]})
-            ans = json.loads(res) if isinstance(res, str) else (res or {})
-            resp = ((ans.get("responses") or [{}])[0]
-                    if isinstance(ans, dict) else {})
-            ur = str(resp.get("user_response") or "").replace("(Recommended)", "").strip().lower()
-            timed_out = bool(ans.get("timed_out")) if isinstance(ans, dict) else False
-            affirmed = ur in ("once", "session", "session 15min", "approve",
-                              "yes", "y", "allow", "ok", "go")
-            # Forensics: record exactly what the approval surface returned, so a
-            # fill without a visible prompt can be diagnosed (never secrets —
-            # clarify payloads carry only question/choice/user_response text).
-            approval_evidence = {"approved_as": ur, "timed_out": timed_out}
-            if timed_out or not affirmed or "deny" in ur:
-                kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                                   "origin": kg.redact_origin(origin), "decision": "deny",
-                                   **approval_evidence})
-                return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
+            from tools.approval_prompt import request_elicitation_consent
+            decision = request_elicitation_consent(
+                f"Fill login {kg.redact_label(alias)} on {kg.redact_origin(origin)}?",
+                ("Hermes wants KeePass to enter this site's username and password "
+                 "into the page (TOTP too when the entry has a seed). Secrets never "
+                 "enter the chat, logs or memory — only this prompt. One-time use: "
+                 "the next fill asks again."),
+                surface="keygate-fill", title="Allow credential fill?")
         except Exception as exc:
             return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
+        approval_evidence = {"approval": str(decision)}
+        if decision != "accept":
+            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
+                               "origin": kg.redact_origin(origin), "decision": "deny",
+                               **approval_evidence})
+            return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
 
         # 2-4) Blind fill through the native secret-safe path (exact-origin
         # binding, inspect+classify, CDP WebSocket only, redaction boundary).
@@ -247,9 +240,10 @@ def register(ctx):
         toolset="keygate",
         schema={"name": "keygate_request_fill",
                 "description": ("Request a blind login fill. FIRST navigate to the login page "
-                                "with browser_navigate (agent browser, not Desktop preview). Asks "
-                                "the user (once/session/deny), checks vault-URL == page origin, "
-                                "resolves KeePass server-side and fills user+password (+TOTP) via CDP. "
+                                "with browser_navigate (agent browser, not Desktop preview). Shows "
+                                "an approval prompt on YOUR screen (accept = one-time fill, anything "
+                                "else denies); checks vault-URL == page origin, resolves KeePass "
+                                "server-side and fills user+password (+TOTP) via CDP. "
                                 "AFTER a successful fill, submit the SAME form without re-navigating "
                                 "(re-navigate clears the filled values), then read the flash message. "
                                 "Returns {success, filled_fields} only — password/TOTP never appear in results."),
