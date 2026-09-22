@@ -231,10 +231,11 @@ def register(ctx):
         name="keygate_request_fill",
         toolset="keygate",
         schema={"name": "keygate_request_fill",
-                "description": ("Request a blind login fill. Asks the user (once/session/deny), "
-                                "checks vault-URL == page origin, resolves KeePass server-side "
-                                "and fills via CDP. Returns {success, filled_fields} only — "
-                                "password/TOTP never appear in results."),
+                "description": ("Request a blind login fill. FIRST navigate to the login page "
+                                "with browser_navigate (agent browser, not Desktop preview). Asks "
+                                "the user (once/session/deny), checks vault-URL == page origin, "
+                                "resolves KeePass server-side and fills via CDP. Returns "
+                                "{success, filled_fields} only — password/TOTP never appear in results."),
                 "parameters": {"type": "object",
                                "properties": {"alias": {"type": "string"},
                                               "origin": {"type": "string"}},
@@ -314,6 +315,41 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
     from tools.browser_vault_tool import (
         _current_page_origin, _eval_js, _eval_js_secret,
         _focus_bound_origin, _parse_json_result)
+    try:
+        from tools.browser_tool import _last_session_key
+    except Exception:
+        def _last_session_key(tid):  # fallback: no remap
+            return tid or "default"
+
+    def _resolve_effective_task(tid):
+        # Existing supervisors first (no session creation, no cloud charge
+        # attempts); single creation-attempt probe afterwards at most.
+        try:
+            from tools.browser_supervisor import SUPERVISOR_REGISTRY
+        except Exception:
+            SUPERVISOR_REGISTRY = None
+        cands = []
+        for cand in (tid, _last_session_key(tid or "default"),
+                     "default", _last_session_key("default")):
+            cand = cand or "default"
+            if cand not in cands:
+                cands.append(cand)
+        if SUPERVISOR_REGISTRY is not None:
+            for cand in cands:
+                try:
+                    if SUPERVISOR_REGISTRY.get(cand) and _current_page_origin(cand):
+                        return cand
+                except Exception:
+                    continue
+        best = _last_session_key(tid or "default")
+        try:
+            if _current_page_origin(best):
+                return best
+        except Exception:
+            pass
+        return best
+
+    task_id = _resolve_effective_task(task_id)
 
     entry_url = kg.show_field(db, kf, alias, "url") or ""
     try:
@@ -340,7 +376,8 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
         return {"success": False, "filled_fields": 0, "origin": origin, "error": str(exc)[:200]}
     if not page_origin:
         return {"success": False, "filled_fields": 0, "origin": origin,
-                "error": "no page open — navigate to the login page first"}
+                "error": ("no page open in the agent browser — navigate with browser_navigate "
+                          "(not the Desktop preview panel) to the login page first, then retry")}
     if page_origin not in allowed:
         return {"success": False, "filled_fields": 0, "origin": origin,
                 "error_type": "origin_mismatch",
