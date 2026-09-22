@@ -55,10 +55,11 @@ def redact_user(user: str) -> str:
 
 
 def redact_origin(origin: str) -> str:
-    """Show TLD + first char of registrable domain: e*******.com."""
+    """Show first char + TLD of the host: https://ejemplo.com/x -> e*******.com.
+    Never the path, query, port or userinfo."""
     s = (origin or "").strip()
-    m = re.search(r"([a-zA-Z0-9*.-]+)", s)
-    host = m.group(1) if m else s
+    host = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", s).split("/")[0]
+    host = host.rsplit("@", 1)[-1].split(":")[0].strip().lower()
     if "." not in host or len(host) <= 4:
         return "***"
     head, _, tail = host.rpartition(".")
