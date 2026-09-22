@@ -304,60 +304,6 @@ def register(ctx):
                                "required": ["domain"]}},
         handler=h_sess_inv)
 
-    # ---- keygate_alias_remove: SAFE delete from Telegram (no secrets in chat) ----
-    def h_rm(params, **kw):
-        del kw
-        alias = str((params or {}).get("alias") or "").strip()
-        if not alias:
-            return json.dumps({"success": False, "error": "alias required"})
-        cfg = _plug_cfg()
-        db, kf = kg.cfg_paths(cfg)
-        entries = kg.list_entries(db, kf)
-        match = next((e for e in entries if e.split("/")[-1] == alias), None)
-        if not match:
-            return json.dumps({"success": False, "error": "alias not found"})
-        try:
-            from tools.approval_prompt import request_elicitation_consent
-            decision = request_elicitation_consent(
-                f"Delete operative login {kg.redact_label(alias)}?",
-                ("This removes the COPY Hermes may use (recoverable from backup or "
-                 "your personal vault). It never touches your personal vault. "
-                 "One-time: confirm explicitly."),
-                surface="keygate-remove", title="Delete operative alias?")
-        except Exception as exc:
-            return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
-        if decision != "accept":
-            kg.audit(_home(), {"ev": "alias-remove", "alias": kg.redact_label(alias),
-                               "decision": "deny"})
-            return json.dumps({"success": False, "error": "user denied"})
-        import shutil as _sh, time as _t
-        try:
-            bak = f"{db}.{int(_t.time())}.bak"
-            _sh.copy2(db, bak)
-            import subprocess as _sp
-            p = _sp.run(["keepassxc-cli", "rm", "-k", kf, "--no-password", "-q",
-                         "--", db, match],
-                        stdin=_sp.DEVNULL, capture_output=True, timeout=30)
-            if p.returncode != 0:
-                return json.dumps({"success": False, "error": "rm failed"})
-            kg.audit(_home(), {"ev": "alias-remove", "alias": kg.redact_label(alias),
-                               "decision": "allow", "backup": bak})
-            return json.dumps({"success": True, "removed": alias, "backup": bak})
-        except Exception as exc:
-            return json.dumps({"success": False, "error": str(exc)[:200]})
-
-    ctx.register_tool(
-        name="keygate_alias_remove",
-        toolset="keygate",
-        schema={"name": "keygate_alias_remove",
-                "description": ("Delete an OPERATIVE copy by alias (safe from Telegram: worst case "
-                                "removes a sacrificial copy, recoverable from backup/personal vault). "
-                                "Shows an approval prompt first. Never touches the personal vault."),
-                "parameters": {"type": "object",
-                               "properties": {"alias": {"type": "string"}},
-                               "required": ["alias"]}},
-        handler=h_rm)
-
     # ---- keygate_alias_add: BLOCKED by policy (no secret creation from chat) ----
     def h_add(params, **kw):
         del params, kw
