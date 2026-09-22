@@ -194,19 +194,28 @@ def register(ctx):
 
         # 1) Human approval via clarify (CLI/Telegram/Desktop surface).
         # The secret is NOT in this prompt — only redacted hint.
+        # FAIL-CLOSED: inspect ONLY user_response + timed_out (the payload
+        # re-echoes our question text, so whole-blob substring checks would
+        # match "Allow" and fail open). Anything but an explicit affirmative
+        # denies.
         try:
             res = ctx.dispatch_tool("clarify", {
                 "questions": [{
                     "question": (f"Allow Hermes to fill login {kg.redact_label(alias)} "
                                  f"on {kg.redact_origin(origin)}?"),
-                    "choices": ["once (Recommended)", "session 15min", "deny"],
+                    "choices": ["once", "session 15min", "deny"],
                 }]})
-            ans = json.loads(res) if isinstance(res, str) else res
-            text = json.dumps(ans).lower()
-            if "deny" in text or "timeout" in text or "did not provide" in text:
+            ans = json.loads(res) if isinstance(res, str) else (res or {})
+            resp = ((ans.get("responses") or [{}])[0]
+                    if isinstance(ans, dict) else {})
+            ur = str(resp.get("user_response") or "").replace("(Recommended)", "").strip().lower()
+            timed_out = bool(ans.get("timed_out")) if isinstance(ans, dict) else False
+            affirmed = ur in ("once", "session", "session 15min", "approve",
+                              "yes", "y", "allow", "ok", "go")
+            if timed_out or not affirmed or "deny" in ur:
                 kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
                                    "origin": kg.redact_origin(origin), "decision": "deny"})
-                return json.dumps({"success": False, "error": "user denied"})
+                return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
         except Exception as exc:
             return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
 
@@ -234,8 +243,10 @@ def register(ctx):
                 "description": ("Request a blind login fill. FIRST navigate to the login page "
                                 "with browser_navigate (agent browser, not Desktop preview). Asks "
                                 "the user (once/session/deny), checks vault-URL == page origin, "
-                                "resolves KeePass server-side and fills via CDP. Returns "
-                                "{success, filled_fields} only — password/TOTP never appear in results."),
+                                "resolves KeePass server-side and fills user+password (+TOTP) via CDP. "
+                                "AFTER a successful fill, submit the SAME form without re-navigating "
+                                "(re-navigate clears the filled values), then read the flash message. "
+                                "Returns {success, filled_fields} only — password/TOTP never appear in results."),
                 "parameters": {"type": "object",
                                "properties": {"alias": {"type": "string"},
                                               "origin": {"type": "string"}},
