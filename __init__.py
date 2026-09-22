@@ -15,7 +15,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
+
+# The plugin loader does not put our directory on sys.path (errors.log:
+# "Failed to load plugin 'keygate': No module named 'keygate_lib'"), so pin
+# it explicitly before importing our sibling module.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from typing import Dict, List
 
 from agent.secret_sources.base import (
