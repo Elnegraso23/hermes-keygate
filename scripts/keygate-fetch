@@ -12,9 +12,9 @@ ALIAS="${REF#kpx://}"; ALIAS="${ALIAS%/*}"; FIELD="${REF##*/}"
 [ -f "$DB" ] || exit 1
 [ -f "$KF" ] || exit 1
 case "$FIELD" in
-  password) exec keepassxc-cli --no-password -k "$KF" -q -s -a Password show -- "$DB" "$ALIAS" ;;
-  username|user) exec keepassxc-cli --no-password -k "$KF" -q -a UserName show -- "$DB" "$ALIAS" ;;
-  totp) exec keepassxc-cli --no-password -k "$KF" -q -t -s show -- "$DB" "$ALIAS" ;;
-  url) exec keepassxc-cli --no-password -k "$KF" -q -a URL show -- "$DB" "$ALIAS" ;;
+  password) exec keepassxc-cli show -k "$KF" --no-password -q -s -a Password -- "$DB" "$ALIAS" ;;
+  username|user) exec keepassxc-cli show -k "$KF" --no-password -q -a UserName -- "$DB" "$ALIAS" ;;
+  totp) exec keepassxc-cli show -k "$KF" --no-password -q -t -s -- "$DB" "$ALIAS" ;;
+  url) exec keepassxc-cli show -k "$KF" --no-password -q -a URL -- "$DB" "$ALIAS" ;;
   *) exit 1;;
 esac

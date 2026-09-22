@@ -87,10 +87,10 @@ class KeepassSource(SecretSource):
         for name, (alias, field) in valid.items():
             try:
                 proc = run_secret_cli(
-                    ["keepassxc-cli", "--no-password", "-k", kf, "-q",
+                    ["keepassxc-cli", "show", "-k", kf, "--no-password", "-q",
                      *([] if field != "totp" else ["-t"]), "-s",
-                     *([] if field in ("totp", "password") else ["-a", _attr(field)]),
-                     "show", "--", db, alias],
+                     *([] if field == "totp" else ["-a", _attr(field)]),
+                     "--", db, alias],
                     allow_env=(), timeout=30.0)
             except RuntimeError as exc:
                 result.warnings.append(f"{name}: helper failed ({exc})")
@@ -109,7 +109,7 @@ class KeepassSource(SecretSource):
 
 
 def _attr(field: str) -> str:
-    return {"username": "UserName", "url": "URL"}.get(field, "Password")
+    return {"username": "UserName", "url": "URL", "password": "Password"}.get(field, "Password")
 
 
 def _burn(s: str) -> None:
