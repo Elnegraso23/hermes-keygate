@@ -18,6 +18,7 @@ fi
 if [ ! -f "$DB" ]; then
   echo "-- creating operative DB (keyfile-only, no master password)"
   keepassxc-cli db-create --set-key-file "$KF" "$DB"
+  chmod 600 "$DB"
   echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
 else
   echo "-- operative DB exists: $DB"
