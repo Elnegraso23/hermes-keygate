@@ -58,7 +58,10 @@ def redact_origin(origin: str) -> str:
     """Show first char + TLD of the host: https://ejemplo.com/x -> e*******.com.
     Never the path, query, port or userinfo."""
     s = (origin or "").strip()
-    host = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", s).split("/")[0]
+    if "://" in s:
+        host = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", "", s).split("/")[0]
+    else:
+        host = s.rsplit("/", 1)[-1]  # file path -> basename
     host = host.rsplit("@", 1)[-1].split(":")[0].strip().lower()
     if "." not in host or len(host) <= 4:
         return "***"

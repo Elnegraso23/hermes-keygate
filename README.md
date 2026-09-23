@@ -6,19 +6,60 @@ Solo la integración KeePass↔Hermes. Sin vault nuevo, sin cripto nueva, sin nu
 - Vault operativo: `hermes.kdbx` **keyfile-only, sin master** (sacrificial, solo copias con alias `gh-agent-1`).
 - Hermes pide `alias + origin` → tú apruebas en CLI/Telegram (`once/sesión/deny/swap`) → el plugin resuelve vía `keepassxc-cli --no-password -k KEYFILE` en memoria del proceso e inyecta por CDP supervisado **solo si `tab.url == item.URL`**. Retorno al modelo: `{ok, filled_fields}`. Password/TOTP jamás en contexto, logs, SQLite o Telegram (solo hints `j***@x.com`).
 
-## 1. Instalar
+## 1. Instalar (procedimiento validado de cero)
+
+Requisitos: `keepassxc` (aporta `keepassxc-cli`), `croc` (opcional, solo sync remoto sin web),
+Hermes Agent con browser local.
 
 ```bash
-apt install keepassxc
+# 1. Vault operativo keyfile-only (SIN master: Hermes nunca recibe password maestra)
 bash ~/hermes-keygate/scripts/keygate-setup
-# lanza agente: keepassxc --config ~/.config/keepassxc-agent.ini ~/Documentos/hermes.kdbx &
-# 1 click Unlock (keyfile-only, sin teclear maestra)
+# crea ~/.keepass-agent.key (0600) + ~/Documentos/hermes.kdbx + perfil ~/.config/keepassxc-agent.ini
+
+# 2. Plugin
 mkdir -p ~/.hermes/plugins/keygate
 cp ~/hermes-keygate/__init__.py ~/hermes-keygate/keygate_lib.py ~/hermes-keygate/plugin.yaml ~/.hermes/plugins/keygate/
-chmod +x ~/hermes-keygate/scripts/keygate-fetch
-# añade el bloque de config.keygate.example.yaml a ~/.hermes/config.yaml (a mano, sin secretos)
-# hermes plugins enable keygate   # o edita plugins.enabled
+hermes plugins enable keygate   # rige en la próxima sesión
+
+# 3. Config en ~/.hermes/config.yaml (a mano, sin secretos):
+plugins:
+  enabled:
+    - keygate
+approvals:
+  mode: manual
+  timeout: 60
+  cron_mode: deny
+  single_query_mode: deny
+secrets:
+  keepass:
+    enabled: true
+    db_path: "/home/tu-usuario/Documentos/hermes.kdbx"
+    keyfile: "/home/tu-usuario/.keepass-agent.key"
+    timeout_seconds: 30
+    env: {}
+browser:
+  backend: "off"        # tools browser_* built-in (browser_navigate), no Browser Use cloud
+  use_real_profile: false  # Chromium empaquetado, no exige tu navegador por defecto
+# allow_private_urls déjalo en false (default): el agente no toca loopback/red privada.
 ```
+
+```bash
+# 4. Verificar (sin modelo, sin browser):
+hermes plugins list | grep -i keygate   # -> enabled
+# keygate_status en tu próximo chat debe decir {locked:false, entries:0}
+
+# 5. Web de sync (opcional, Tailscale/LAN; genera token largo):
+openssl rand -hex 24 > ~/.hermes/keygate-sync-token && chmod 600 ~/.hermes/keygate-sync-token
+KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
+KEYGATE_SYNC_TOKEN="$(cat ~/.hermes/keygate-sync-token)" \
+KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
+python3 ~/hermes-keygate/sync/keygate_sync.py
+# abre http://127.0.0.1:8472 (por Tailscale: tu-ip-tailscale:8472). NUNCA 0.0.0.0.
+```
+
+Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/`,
+el bloque de arriba de `config.yaml`, y (si quieres) DB/keyfile/token/audit.
+Nada queda en Hermes.
 
 ## 2. Dar cuentas (30s c/u, manual = seguridad)
 
