@@ -146,8 +146,62 @@ def _home() -> Path:
         return Path.home() / ".hermes"
 
 
+def _version_info() -> dict:
+    """Installed vs repo version for Hermes: update notices + changelog.
+    Updates never touch vaults (enforced in scripts/keygate-update)."""
+    here = Path(__file__).resolve().parent
+    info: dict = {"installed_version": "unknown", "installed_commit": "unknown",
+                  "repo_head": None, "repo_version": None,
+                  "update_available": False, "changelog": []}
+    try:
+        for line in (here / "plugin.yaml").read_text().splitlines():
+            if line.strip().startswith("version:"):
+                info["installed_version"] = line.split(":", 1)[1].strip().strip('"')
+    except Exception:
+        pass
+    try:
+        info["installed_commit"] = (here / ".installed_commit").read_text().strip()[:12]
+    except Exception:
+        pass
+    repo = Path.home() / "hermes-keygate"
+    try:
+        import subprocess as _sp
+        head = _sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                       capture_output=True, text=True, timeout=10).stdout.strip()
+        if head:
+            info["repo_head"] = head[:12]
+            for line in (repo / "plugin.yaml").read_text().splitlines():
+                if line.strip().startswith("version:"):
+                    info["repo_version"] = line.split(":", 1)[1].strip().strip('"')
+            inst = info["installed_commit"]
+            if inst and inst != "unknown" and not head.startswith(inst):
+                info["update_available"] = True
+                log = _sp.run(["git", "-C", str(repo), "log", "--format=%s",
+                               f"{inst}..HEAD", "--max-count=5"],
+                              capture_output=True, text=True, timeout=10).stdout
+                info["changelog"] = [l for l in log.splitlines() if l.strip()][:5]
+            elif (info["repo_version"] and info["installed_version"] != "unknown"
+                    and info["repo_version"] != info["installed_version"]):
+                info["update_available"] = True
+    except Exception:
+        pass
+    return info
+
+
 def register(ctx):
     ctx.register_secret_source(KeepassSource())
+    try:
+        _vi = _version_info()
+        if _vi.get("update_available"):
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "keygate update available: installed %s (%s) -> repo %s (%s). "
+                "Run scripts/keygate-update. Updates never touch .kdbx/.key. %s",
+                _vi.get("installed_version"), _vi.get("installed_commit"),
+                _vi.get("repo_version"), _vi.get("repo_head"),
+                "; ".join(_vi.get("changelog", []))[:300])
+    except Exception:
+        pass
 
     # ---- keygate_search: redacted metadata only ----
     def h_search(params, **kw):
@@ -270,6 +324,22 @@ def register(ctx):
                 "description": "Operative KeePass status: locked? how many aliases? (counts only)",
                 "parameters": {"type": "object", "properties": {}, "required": []}},
         handler=h_status)
+
+    # ---- keygate_version: update notices for Hermes ----
+    def h_version(params, **kw):
+        del params, kw
+        return json.dumps({"success": True, **_version_info()})
+
+    ctx.register_tool(
+        name="keygate_version",
+        toolset="keygate",
+        schema={"name": "keygate_version",
+                "description": ("Installed vs repo version, update_available flag and changelog. "
+                                "Call it when starting credential work: if update_available is true, "
+                                "tell the user to run scripts/keygate-update. Updates never touch "
+                                ".kdbx/.key (enforced by the updater)."),
+                "parameters": {"type": "object", "properties": {}, "required": []}},
+        handler=h_version)
 
     # ---- sessions (ephemeral TTL, no secrets stored) ----
     def h_sess_ensure(params, **kw):
