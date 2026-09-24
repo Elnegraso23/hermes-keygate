@@ -1,27 +1,56 @@
-# hermes-keygate — blind KeePassXC injector (Plan A)
+# 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 
-Solo la integración KeePass↔Hermes. Sin vault nuevo, sin cripto nueva, sin nube.
+Hermes se loguea en tus sitios **sin ver jamás tus contraseñas**: tú apruebas
+en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
+*1Password for Claude*, 100% open source y self-hosted.
 
-- Vault frío: tu `personal.kdbx` (master+keyfile, Hermes no lo conoce).
-- Vault operativo: `hermes.kdbx` **keyfile-only, sin master** (sacrificial, solo copias con alias `gh-agent-1`).
-- Hermes pide `alias + origin` → tú apruebas en CLI/Telegram (`once/sesión/deny/swap`) → el plugin resuelve vía `keepassxc-cli --no-password -k KEYFILE` en memoria del proceso e inyecta por CDP supervisado **solo si `tab.url == item.URL`**. Retorno al modelo: `{ok, filled_fields}`. Password/TOTP jamás en contexto, logs, SQLite o Telegram (solo hints `j***@x.com`).
+## Cómo funciona (diseño en 30 segundos)
 
-## 1. Instalar (procedimiento validado de cero)
+```
+Tú (KeePassXC GUI)                Hermes (modelo)              Plugin (tu máquina)
+─────────────────                 ──────────────              ───────────────────
+hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
+ sin master)                       origin"                    vía keepassxc-cli
+      │                                   │                    en memoria local
+      │                          ┌────────┴────────┐                   │
+      │                          │ TÚ APRUEBAS en  │                   │
+      │                          │ tu pantalla     │                   │
+      │                          └────────┬────────┘                   │
+      │                                   │                    inyecta por CDP
+      │                                   │                    solo si la pestaña
+      │                                   │                    == URL del ítem
+      │                           recibe {success,                    │
+      │                           filled_fields}  ← NUNCA el secreto ──┘
+```
 
-Requisitos: `keepassxc` (aporta `keepassxc-cli`), `croc` (opcional, solo sync remoto sin web),
-Hermes Agent con browser local.
+**Garantías:**
+- El password/TOTP **nunca** entra al contexto del modelo, logs, SQLite, Telegram ni audit (solo hints `j***@x.com`).
+- Sin aprobación explícita no hay fill (fail-closed verificado; ni timeouts ni errores aprueban).
+- Amarre exacto de origen (vault-URL == origen pedido == origen de la pestaña, re-chequeado dentro del script contra TOCTOU).
+- Cada fill deja auditoría redactada (`~/.hermes/keygate-audit.jsonl`).
+- Altas/bajas de credenciales **desde el chat están bloqueadas por política**: los cambios se hacen en tu KeePassXC + sync del `.kdbx`.
+
+**Dos vaults (el corazón del diseño):**
+- `personal.kdbx` — el tuyo de siempre (master+keyfile). Hermes **no lo conoce ni lo toca**.
+- `hermes.kdbx` — operativo, **keyfile-only sin master password** (no hay maestra que robar/filtrar), solo con copias de lo que el agente puede usar, con alias opacos (`sitio-agent-1`).
+
+## Instalación
 
 ```bash
-# 1. Vault operativo keyfile-only (SIN master: Hermes nunca recibe password maestra)
-bash ~/hermes-keygate/scripts/keygate-setup
-# crea ~/.keepass-agent.key (0600) + ~/Documentos/hermes.kdbx + perfil ~/.config/keepassxc-agent.ini
+# Requisitos: keepassxc (aporta keepassxc-cli) + Hermes Agent con browser local.
+# Opcional: croc (solo sync remoto sin web).
 
-# 2. Plugin
+# 1. Clona e instala el plugin
+git clone https://github.com/Elnegraso23/hermes-keygate.git ~/hermes-keygate
 mkdir -p ~/.hermes/plugins/keygate
 cp ~/hermes-keygate/__init__.py ~/hermes-keygate/keygate_lib.py ~/hermes-keygate/plugin.yaml ~/.hermes/plugins/keygate/
 hermes plugins enable keygate   # rige en la próxima sesión
 
-# 3. Config en ~/.hermes/config.yaml (a mano, sin secretos):
+# 2. Crea el vault operativo (SIN master: Hermes nunca recibe password maestra)
+bash ~/hermes-keygate/scripts/keygate-setup
+# → ~/.keepass-agent.key (0600) + ~/Documentos/hermes.kdbx + perfil ~/.config/keepassxc-agent.ini
+
+# 3. Configura ~/.hermes/config.yaml (sin secretos):
 plugins:
   enabled:
     - keygate
@@ -33,117 +62,107 @@ approvals:
 secrets:
   keepass:
     enabled: true
-    db_path: "/home/tu-usuario/Documentos/hermes.kdbx"
-    keyfile: "/home/tu-usuario/.keepass-agent.key"
+    db_path: "/home/TU-USUARIO/Documentos/hermes.kdbx"
+    keyfile: "/home/TU-USUARIO/.keepass-agent.key"
     timeout_seconds: 30
     env: {}
 browser:
-  backend: "off"        # tools browser_* built-in (browser_navigate), no Browser Use cloud
-  use_real_profile: false  # Chromium empaquetado, no exige tu navegador por defecto
-# allow_private_urls déjalo en false (default): el agente no toca loopback/red privada.
+  backend: "off"            # tools browser_* built-in, no Browser Use cloud
+  use_real_profile: false   # Chromium empaquetado, no exige tu navegador
+# allow_private_urls déjalo en false: el agente no toca loopback/red privada.
+
+# 4. Verifica (sin modelo ni browser):
+hermes plugins list | grep -i keygate   # → enabled
+# En tu próximo chat, keygate_status debe decir {locked:false, entries:0}
 ```
 
-```bash
-# 4. Verificar (sin modelo, sin browser):
-hermes plugins list | grep -i keygate   # -> enabled
-# keygate_status en tu próximo chat debe decir {locked:false, entries:0}
+Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/`,
+el bloque de config, y (si quieres) DB/keyfile/token/audit. Nada queda en Hermes.
 
-# 5. Web de sync (opcional, Tailscale/LAN; genera token largo):
+## Dar cuentas (30s c/u, manual = seguridad)
+
+En KeePassXC: duplica un ítem de tu personal → muévelo a `hermes.kdbx` →
+renómbralo a alias opaco (`github-agent-1`) → URL exacta del login → sin
+notas/adjuntos → guarda. Quitar acceso = borrar la copia (o cerrar la DB).
+
+## Uso diario
+
+Pide en el chat (sesión nueva tras instalar):
+
+```
+Usa browser_navigate para abrir <URL-del-login> en el navegador del agente.
+Luego usa tool_search para descubrir keygate_request_fill y logueate con
+alias <alias> y origin <https://dominio>. Espera mi aprobacion antes del fill.
+Tras un fill exitoso haz submit del MISMO formulario sin re-navegar y citame
+textual el mensaje de la página. Jamas contraseñas en el chat ni
+execute_code/curl con credenciales.
+```
+
+- `keygate_search("...")` → hints redactados (nunca secretos).
+- Aprobación `Allow credential fill?` en tu pantalla → accept = un solo fill.
+- `keygate_version` → instalada vs repo + changelog (el modelo te avisa de updates).
+- Sesiones efímeras: `keygate_session_ensure/invalidate` (handles opacos en tmpfs;
+  ante 401 se invalida y re-pide aprobación, nunca reintenta con vencidas).
+
+## Probarlo (sitio público de pruebas)
+
+Sin cuentas reales: [the-internet login](https://the-internet.herokuapp.com/login)
+(user `tomsmith`, pass `SuperSecretPassword!` — públicas, impresas en la página):
+
+```bash
+printf 'SuperSecretPassword!\n' | keepassxc-cli add -k ~/.keepass-agent.key \
+  --no-password -q ~/Documentos/hermes.kdbx internet-agent-1 \
+  -u tomsmith --url https://the-internet.herokuapp.com/login -p
+```
+
+Luego el prompt de arriba con `alias internet-agent-1` y
+`origin https://the-internet.herokuapp.com`. Éxito =
+`You logged into a secure area!` + audit `allow` + `approval: accept`.
+
+## Sync al host Hermes (mismo PC o remoto)
+
+Edita siempre en tu KeePassXC local. El operativo viaja como ciphertext; el
+`.key` **jamás viaja** (vive quieto en cada máquina, 0600). keygate lee el
+archivo por llamada: el reemplazo aplica sin reiniciar. Modo local = edita en
+su sitio, sin transferir nada.
+
+**Primario: web `keygate-sync`** (solo Tailscale/LAN, stdlib puro):
+
+```bash
 openssl rand -hex 24 > ~/.hermes/keygate-sync-token && chmod 600 ~/.hermes/keygate-sync-token
 KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
 KEYGATE_SYNC_TOKEN="$(cat ~/.hermes/keygate-sync-token)" \
 KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
 python3 ~/hermes-keygate/sync/keygate_sync.py
-# abre http://127.0.0.1:8472 (por Tailscale: tu-ip-tailscale:8472). NUNCA 0.0.0.0.
+# NUNCA bindees 0.0.0.0. Sin token (>=16) no arranca.
 ```
 
-Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/`,
-el bloque de arriba de `config.yaml`, y (si quieres) DB/keyfile/token/audit.
-Nada queda en Hermes.
+`/api/aliases` redactados · `POST /api/upload` (valida KDBX+keyfile, rehúsa
+vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
+(**una sola vez**, luego 410) · `/api/audit`. Todo con Bearer. La página no
+tiene ningún campo de password: solo mueve ciphertext.
 
-## 2. Actualizar y dar seguimiento
+**Fallback: `croc`** — `scripts/keygate-push [--dry-run]` en tu PC y
+`scripts/keygate-pull <CODIGO>` en el host (valida, backup×5, atómico,
+rehúsa `*.key` siempre).
+
+## Actualizar y seguimiento
 
 ```bash
 bash ~/hermes-keygate/scripts/keygate-update   # pull + instala + verifica; rige próxima sesión
 ```
 
-* Al arrancar, el plugin avisa en logs si hay update; `keygate_version`
-  dice instalada vs repo + changelog (la tool le dice al modelo que te avise).
-* Garantía enforced por el updater: si un update trajera `.kdbx`/`.key`,
-  **aborta** sin tocar nada (exit 3).
-
-* Repo privado: `https://github.com/Elnegraso23/hermes-keygate` (rama `main`).
-* Problemas/ideas: abre un Issue ahí con: qué esperabas, qué devolvió la tool
-  (pega el JSON), y las últimas 3 líneas de `~/.hermes/keygate-audit.jsonl`
-  (**tacha cualquier secreto** si fuera una cuenta real — el audit no guarda,
-  pero verifica antes de pegar).
-* Regla: ningún fix toca tu `.kdbx`/`.key`; solo código + docs.
-
-## 2. Dar cuentas (30s c/u, manual = seguridad)
-
-KeePassXC personal → duplicar ítem → mover copia a `hermes.kdbx` → renombrar `gh-agent-1`, URL exacta, TOTP si toca, sin notas/adjuntos. Quitar = borrar copia o cerrar DB.
-
-## 3. Uso diario
-
-- `keygate_status` → `{locked, entries}` (conteo).
-- `keygate_search("gith")` → `[{alias: gh-agent-1, hint: g***-1 (j***@x)}]`.
-- Agente llama `keygate_request_fill(alias, origin)` → Telegram: `e*******.com pide g***-1 [once/sesión/deny]` → apruebas → fill + TOTP auto → `{success:true}`.
-- Efímeras: `keygate_session_ensure(domain, ttl)` reutiliza handle opaco en tmpfs (`/dev/shm/hermes-keygate`, 0700); ante 401 → `keygate_session_invalidate(domain)` y re-aprobación. Nunca reintenta con vencidas.
-- Auto-lock: operativo 8h + lock en screen-lock/suspend; personal 60s. Si bloqueado: `esperando desbloqueo local`, fail-closed.
-
-## 4. Remoto seguro
-
-Sin mandar maestras: vault operativo donde corre Hermes (`hermes-remote.kdbx` mínimo), o `ssh -L` al socket local + click local. Nunca pegar master/keyfile por Telegram.
-
-## 5. Pruebas anti-fuga
-
-```bash
-python3 -m pytest ~/hermes-keygate/tests/ -q
-grep -ri "password" ~/.hermes/plugins/keygate/__init__.py | grep -v "never\|password/TOTP\|no password" || true
-# tras 1 fill: grep -r "<tu-password-real>" ~/.hermes/state.db ~/.hermes/logs/ → debe dar 0
-tail ~/.hermes/keygate-audit.jsonl
-```
-
-## 6. Sync al host Hermes (local + remoto)
-
-Edita siempre en tu KeePassXC local. El operativo viaja como ciphertext;
-el `.key` **jamás viaja** (vive quieto en cada máquina, 0600). keygate lee
-el archivo por llamada: el reemplazo aplica sin reiniciar.
-
-**Modo local** (misma máquina): no transfieras nada, edita en su sitio.
-
-**Modo remoto — primario: web `keygate-sync`** (solo Tailscale/LAN):
-
-```bash
-KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
-KEYGATE_SYNC_TOKEN='<token-largo>' KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
-python3 ~/hermes-keygate/sync/keygate_sync.py
-# NUNCA bindees 0.0.0.0 — llega por Tailscale. Sin token (>=16) no arranca.
-```
-
-* `/` estado, `/api/aliases` hints redactados, `POST /api/upload` (valida
-  KDBX+keyfile, rehúsa vacíos anti-wipe, backup+reemplazo atómico),
-  `/api/onboarding/keyfile` (**una sola vez**, luego 410), `/api/audit`.
-  Todo con `Authorization: Bearer`. Bajas: se hacen borrando en tu KeePassXC
-  local y re-subiendo (reemplazo total, sin borrados remotos sueltos).
-* Onboarding inicial: descarga el `.key` **una vez** por la web (Tailscale),
-  guárdalo 0600 en tu PC editor. Después ese endpoint muere.
-
-**Modo remoto — fallback: `croc`** (sin Tailscale/red especial):
-
-```bash
-# tu PC:  scripts/keygate-push [--dry-run]   → imprime sha256 + código
-# host:   ssh por tailscale → scripts/keygate-pull <CODIGO> [--dry-run]
-# pull valida (abre con keyfile, >=1 entrada), backup (retiene 5),
-# reemplazo atómico y verificación. Rehúsa paths *.key siempre.
-```
-
-**Telegram**: sin altas ni bajas desde el chat. `keygate_alias_add`
-**siempre rechazada por política** (las credenciales nunca salen del chat);
-los cambios se hacen en tu KeePassXC local + sync del `.kdbx`.
+- Si un update trajera `.kdbx`/`.key`, **aborta** sin tocar nada.
+- Issues: [github.com/Elnegraso23/hermes-keygate/issues](https://github.com/Elnegraso23/hermes-keygate/issues)
+  (qué esperabas, JSON de la tool, últimas líneas del audit **sin secretos**).
+- Regla: los fixes solo tocan código/docs, jamás tu vault.
 
 ## Límites honestos
 
-- Plugin corre in-process (privilegio de agente): la garantía es "nunca al LLM/logs", no sandbox contra root/malware local.
-- `fill` exige sesión de browser supervisada abierta; sin ella rehúsa antes que filtrar por argv.
-- `fetch()` de SecretSource hidrata env al arranque (solo refs `kpx://` que mapees): no mapees todo el vault, solo API keys necesarias.
+- El plugin corre in-process (privilegio de agente): la garantía es "nunca al
+  LLM/logs", no sandbox contra root/malware local.
+- `fill` exige sesión de browser supervisada; sin ella rehúsa antes que filtrar.
+- TOTP: resuelve semillas guardadas en la entrada; pendiente prueba end-to-end
+  con cuenta real con 2FA.
+- `fetch()` de SecretSource solo hidrata refs `kpx://` que mapees: no mapees
+  todo el vault, solo API keys necesarias.
