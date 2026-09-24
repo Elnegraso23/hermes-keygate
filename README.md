@@ -137,6 +137,23 @@ python3 ~/hermes-keygate/sync/keygate_sync.py
 # NUNCA bindees 0.0.0.0. Sin token (>=16) no arranca.
 ```
 
+### El token: dónde está y cómo conseguirlo (local y remoto)
+
+La web te pedirá `Token de keygate-sync`: es su contraseña. Vive **solo** en
+el host, archivo `0600` — pégalo desde ahí:
+
+```bash
+cat ~/.hermes/keygate-sync-token
+```
+
+* Queda en `sessionStorage` de esa pestaña, en ningún disco más.
+* **Remoto sin acceso a archivos**: un SSH por Tailscale, corre ese mismo
+  `cat`, guarda el token en el gestor de tu móvil. Una sola vez, para siempre.
+* **Jamás por Telegram/chat**: quedaría en historial y servidores de Telegram
+  (la misma razón por la que nunca viajan passwords).
+* El servidor al arrancar te dice *dónde* está el token; nunca lo imprime ni
+  lo loguea.
+
 `/api/aliases` redactados · `POST /api/upload` (valida KDBX+keyfile, rehúsa
 vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
 (**una sola vez**, luego 410) · `/api/audit`. Todo con Bearer. La página no
