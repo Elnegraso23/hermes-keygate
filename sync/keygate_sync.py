@@ -426,6 +426,9 @@ def main() -> int:
         print(f"DB no existe aún: {db} (corre keygate-setup primero)", file=sys.stderr)
     srv = ThreadingHTTPServer((bind, port), Handler)
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
+    print("Token: el de KEYGATE_SYNC_TOKEN (no se imprime ni se loguea). "
+          "Remoto sin archivos: un SSH por Tailscale, `cat ~/.hermes/keygate-sync-token`, "
+          "guárdalo en el gestor de tu móvil. Jamás por chat (queda en historial).")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
