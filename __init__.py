@@ -146,6 +146,41 @@ def _home() -> Path:
         return Path.home() / ".hermes"
 
 
+def _channel_diag() -> dict:
+    """How could we reach the human? Booleans + platform only, never secrets
+    or full session keys. Lets remote debugging happen via chat paste."""
+    d: dict = {"session": False, "platform": None, "cron": False,
+               "single_query": False, "gateway": False,
+               "interactive_cli": False, "notify_cb": False}
+    try:
+        from tools import approval_context as _ctx
+        try:
+            d["session"] = bool(_ctx.get_current_session_key())
+        except Exception:
+            pass
+        try:
+            d["platform"] = str(_ctx._get_session_platform())
+        except Exception:
+            pass
+        for k, fn in (("cron", "_is_cron_approval_context"),
+                      ("single_query", "_is_single_query_approval_context"),
+                      ("gateway", "_is_gateway_approval_context"),
+                      ("interactive_cli", "_is_interactive_cli")):
+            try:
+                d[k] = bool(getattr(_ctx, fn)())
+            except Exception:
+                pass
+        if d["gateway"] and d["session"]:
+            try:
+                from tools import approval as _a
+                d["notify_cb"] = bool(_a._gateway_notify_cb(_ctx.get_current_session_key()))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return d
+
+
 def _version_info() -> dict:
     """Installed vs repo version for Hermes: update notices + changelog.
     Updates never touch vaults (enforced in scripts/keygate-update)."""
@@ -249,10 +284,13 @@ def register(ctx):
         # 1) Human approval on the active session's own surface
         # (gateway buttons / CLI panel / Desktop) via the sanctioned
         # elicitation API — the same path native vault uses for card fills.
-        # NEVER via registry-dispatched clarify: clarify is an inline tool
-        # whose UI callback is injected by the turn loop, so a registry
-        # dispatch runs it headless and it fails closed (approved_as "").
-        # FAIL-CLOSED: only "accept" proceeds; decline/cancel/timeout deny.
+        # Unattended contexts (cron, -q) cannot prompt: refuse immediately
+        # with a distinct error instead of a silent decline.
+        _ch = _channel_diag()
+        if _ch.get("cron") or _ch.get("single_query"):
+            return json.dumps({"success": False, "error_type": "unattended",
+                               "error": ("this session cannot prompt (cron/one-shot): "
+                                         "run from an interactive CLI/Desktop/Telegram session")})
         try:
             from tools.approval_prompt import request_elicitation_consent
             decision = request_elicitation_consent(
@@ -269,7 +307,8 @@ def register(ctx):
             kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
                                "origin": kg.redact_origin(origin), "decision": "deny",
                                **approval_evidence})
-            return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
+            return json.dumps({"success": False, "error": "user denied (explicit approval required)",
+                               "error_type": "denied", "channel": _ch})
 
         # 2-4) Blind fill through the native secret-safe path (exact-origin
         # binding, inspect+classify, CDP WebSocket only, redaction boundary).
@@ -340,6 +379,34 @@ def register(ctx):
                                 ".kdbx/.key (enforced by the updater)."),
                 "parameters": {"type": "object", "properties": {}, "required": []}},
         handler=h_version)
+
+    # ---- keygate_doctor: remote diagnostics without secrets ----
+    def h_doctor(params, **kw):
+        del params, kw
+        cfg = _plug_cfg()
+        db, kf = kg.cfg_paths(cfg)
+        locked = kg.db_locked(db, kf)
+        out = {"success": True, "version": _version_info(),
+               "db": {"locked": locked,
+                      "entries": 0 if locked else len(kg.list_entries(db, kf))},
+               "channel": _channel_diag(), "audit_tail": []}
+        try:
+            lines = (_home() / "keygate-audit.jsonl").read_text().splitlines()[-3:]
+            out["audit_tail"] = lines
+        except Exception:
+            pass
+        return json.dumps(out)
+
+    ctx.register_tool(
+        name="keygate_doctor",
+        toolset="keygate",
+        schema={"name": "keygate_doctor",
+                "description": ("Diagnose this host without secrets: plugin version/update, "
+                                "operative DB locked + entry count, approval channel reachability "
+                                "(platform, gateway notify), last redacted audit lines. Paste the "
+                                "result when reporting problems."),
+                "parameters": {"type": "object", "properties": {}, "required": []}},
+        handler=h_doctor)
 
     # ---- sessions (ephemeral TTL, no secrets stored) ----
     def h_sess_ensure(params, **kw):
