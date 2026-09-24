@@ -308,7 +308,10 @@ def register(ctx):
                                "origin": kg.redact_origin(origin), "decision": "deny",
                                **approval_evidence})
             return json.dumps({"success": False, "error": "user denied (explicit approval required)",
-                               "error_type": "denied", "channel": _ch})
+                               "error_type": "denied", "channel": _ch,
+                               "hint": ("If no prompt was shown, this session has no approval UI "
+                                        "path: report `channel` + run keygate_doctor. Never retry "
+                                        "silently and never use execute_code/curl with credentials.")})
 
         # 2-4) Blind fill through the native secret-safe path (exact-origin
         # binding, inspect+classify, CDP WebSocket only, redaction boundary).
