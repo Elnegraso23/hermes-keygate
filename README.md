@@ -67,6 +67,11 @@ Nada queda en Hermes.
 bash ~/hermes-keygate/scripts/keygate-update   # pull + instala + verifica; rige próxima sesión
 ```
 
+* Al arrancar, el plugin avisa en logs si hay update; `keygate_version`
+  dice instalada vs repo + changelog (la tool le dice al modelo que te avise).
+* Garantía enforced por el updater: si un update trajera `.kdbx`/`.key`,
+  **aborta** sin tocar nada (exit 3).
+
 * Repo privado: `https://github.com/Elnegraso23/hermes-keygate` (rama `main`).
 * Problemas/ideas: abre un Issue ahí con: qué esperabas, qué devolvió la tool
   (pega el JSON), y las últimas 3 líneas de `~/.hermes/keygate-audit.jsonl`
