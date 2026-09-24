@@ -11,7 +11,7 @@ echo "== keygate-update =="
 BEFORE=$(git -C "$REPO" rev-parse --short HEAD)
 git -C "$REPO" pull --ff-only 2>&1 | tail -n 2 || { echo "pull falló (¿cambios locales? haz stash primero)" >&2; exit 2; }
 AFTER=$(git -C "$REPO" rev-parse --short HEAD)
-if [ "$BEFORE" = "$AFTER" ]; then echo "sin cambios ($AFTER), nada que hacer"; exit 0; fi
+if [ "$BEFORE" = "$AFTER" ]; then echo "sin cambios nuevos ($AFTER); reinstalando igual para fijar marcador"; fi
 echo "repo: $BEFORE -> $AFTER"
 # GARANTÍA: un update jamás toca vaults. Si el rango trae .kdbx/.key, aborta.
 if git -C "$REPO" diff --name-only "$BEFORE" "$AFTER" | grep -qE '\.(kdbx|key)$'; then
