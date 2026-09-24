@@ -61,6 +61,19 @@ Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/
 el bloque de arriba de `config.yaml`, y (si quieres) DB/keyfile/token/audit.
 Nada queda en Hermes.
 
+## 2. Actualizar y dar seguimiento
+
+```bash
+bash ~/hermes-keygate/scripts/keygate-update   # pull + instala + verifica; rige próxima sesión
+```
+
+* Repo privado: `https://github.com/Elnegraso23/hermes-keygate` (rama `main`).
+* Problemas/ideas: abre un Issue ahí con: qué esperabas, qué devolvió la tool
+  (pega el JSON), y las últimas 3 líneas de `~/.hermes/keygate-audit.jsonl`
+  (**tacha cualquier secreto** si fuera una cuenta real — el audit no guarda,
+  pero verifica antes de pegar).
+* Regla: ningún fix toca tu `.kdbx`/`.key`; solo código + docs.
+
 ## 2. Dar cuentas (30s c/u, manual = seguridad)
 
 KeePassXC personal → duplicar ítem → mover copia a `hermes.kdbx` → renombrar `gh-agent-1`, URL exacta, TOTP si toca, sin notas/adjuntos. Quitar = borrar copia o cerrar DB.

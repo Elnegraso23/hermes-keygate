@@ -1,0 +1,24 @@
+#!/bin/bash
+# keygate-update: actualiza el plugin desde GitHub y lo deja live.
+# Uso: scripts/keygate-update  (corre en tu PC con el repo clonado)
+# Flujo: git pull --ff-only -> copia plugin -> sintaxis -> registro -> reporte.
+# Si algo falla, no toca nada (fail-closed) y te dice el paso exacto.
+set -euo pipefail
+REPO="$HOME/hermes-keygate"
+DEST="$HOME/.hermes/plugins/keygate"
+echo "== keygate-update =="
+[ -d "$REPO/.git" ] || { echo "no hay repo en $REPO" >&2; exit 2; }
+BEFORE=$(git -C "$REPO" rev-parse --short HEAD)
+git -C "$REPO" pull --ff-only 2>&1 | tail -n 2 || { echo "pull falló (¿cambios locales? haz stash primero)" >&2; exit 2; }
+AFTER=$(git -C "$REPO" rev-parse --short HEAD)
+if [ "$BEFORE" = "$AFTER" ]; then echo "sin cambios ($AFTER), nada que hacer"; exit 0; fi
+echo "repo: $BEFORE -> $AFTER"
+mkdir -p "$DEST"
+for f in __init__.py keygate_lib.py plugin.yaml; do
+  [ -f "$REPO/$f" ] || { echo "falta $f en repo, abortando (instalación intacta)" >&2; exit 2; }
+done
+python3 -c "import ast; [ast.parse(open('$REPO/'+f).read()) for f in ['__init__.py','keygate_lib.py']]" \
+  || { echo "sintaxis rota en update, abortando" >&2; exit 2; }
+cp "$REPO/__init__.py" "$REPO/keygate_lib.py" "$REPO/plugin.yaml" "$DEST/"
+echo "instalado en $DEST. Rige en tu próxima sesión de hermes (reinicia el chat)."
+echo "seguimiento: reporta en https://github.com/Elnegraso23/hermes-keygate/issues"
