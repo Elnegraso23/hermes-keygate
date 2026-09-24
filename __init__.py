@@ -22,7 +22,7 @@ from pathlib import Path
 # "Failed to load plugin 'keygate': No module named 'keygate_lib'"), so pin
 # it explicitly before importing our sibling module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from agent.secret_sources.base import (
     ErrorKind,
@@ -225,6 +225,11 @@ def _version_info() -> dict:
 
 def register(ctx):
     ctx.register_secret_source(KeepassSource())
+    try:
+        from pathlib import Path as _P
+        ctx.register_skill("keygate-default", _P(__file__).resolve().parent / "skills" / "keygate-default")
+    except Exception:
+        pass
     try:
         _vi = _version_info()
         if _vi.get("update_available"):
@@ -459,6 +464,110 @@ def register(ctx):
                 "description": "ALWAYS REFUSED by policy. Credentials are never created from chat.",
                 "parameters": {"type": "object", "properties": {}, "required": []}},
         handler=h_add)
+
+    # ---- keygate_import: mirror ONE operative copy into the native vault ----
+    # This is what makes KeePass the DEFAULT login source: after a single
+    # approval, the entry lives encrypted in Hermes' local vault and the
+    # native browser_vault_fill path ( origin-bound, model-blind ) just works.
+    # Server-side only: values travel KeePass -> vault store, never the model.
+    def h_import(params, **kw):
+        del kw
+        alias = str((params or {}).get("alias") or "").strip()
+        if not alias:
+            return json.dumps({"success": False, "error": "alias required"})
+        cfg = _plug_cfg()
+        db, kf = kg.cfg_paths(cfg)
+        entries = kg.list_entries(db, kf)
+        match = next((e for e in entries if e.split("/")[-1] == alias), None)
+        if not match:
+            return json.dumps({"success": False, "error": "alias not found in operative vault"})
+        try:
+            from tools.approval_prompt import request_elicitation_consent
+            decision = request_elicitation_consent(
+                f"Import login {kg.redact_label(alias)} into Hermes vault?",
+                ("ONE-TIME copy of the username+password into the encrypted local vault "
+                 "(label keygate:<alias>) so site logins fill natively. Source stays KeePass; "
+                 "delete the copy any time via Hermes vault settings. Secrets never enter chat."),
+                surface="keygate-import", title="Import login from KeePass?")
+        except Exception as exc:
+            return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
+        if decision != "accept":
+            kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(alias),
+                               "decision": "deny"})
+            return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
+        username = kg.show_field(db, kf, match, "username") or ""
+        password = kg.show_field(db, kf, match, "password") or ""
+        entry_url = kg.show_field(db, kf, match, "url") or ""
+        if not username or not password or not entry_url:
+            return json.dumps({"success": False,
+                               "error": "entry needs username+password+URL in KeePass"})
+        otp_seed = _totp_seed(db, kf, match)
+        secret = {"identifier_type": ("email" if "@" in username else "username"),
+                  "identifier": username, "password": password}
+        if otp_seed:
+            secret["otp_secret"] = otp_seed
+        try:
+            from agent.vault_store import get_vault_store, normalize_origin
+            store = get_vault_store()
+            label = f"keygate:{alias}"
+            for meta in store.list_items():
+                if meta.label == label:
+                    store.remove_item(meta.id)
+            meta = store.add_item(kind="login", label=label, secret=secret,
+                                  origin=normalize_origin(entry_url))
+        except Exception as exc:
+            from agent.vault_store import scrub_secret_from_text
+            return json.dumps({"success": False,
+                               "error": scrub_secret_from_text(f"import failed: {exc}",
+                                                               {"password": password})[:200]})
+        finally:
+            kg.zeroize(bytearray(password.encode()))
+            password = ""
+        kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(alias),
+                           "decision": "allow", "handle": meta.id,
+                           "has_otp": bool(otp_seed)})
+        return json.dumps({"success": True, "imported": True, "label": label,
+                           "handle": meta.id, "origin": meta.origin,
+                           "has_otp": bool(otp_seed),
+                           "next": "browser_vault_fill with this handle, then submit"})
+
+    ctx.register_tool(
+        name="keygate_import",
+        toolset="keygate",
+        schema={"name": "keygate_import",
+                "description": ("Mirror ONE KeePass operative copy into the encrypted local vault "
+                                "(label keygate:<alias>) after ONE approval. Afterwards native "
+                                "browser_vault_fill works by default. Values never enter the chat."),
+                "parameters": {"type": "object",
+                               "properties": {"alias": {"type": "string"}},
+                               "required": ["alias"]}},
+        handler=h_import)
+
+
+def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
+    """Best-effort TOTP seed extraction for import. Empty when the entry has
+    no seed or the CLI does not expose it (codes still work via show -t)."""
+    import re as _re
+    import subprocess as _sp
+    try:
+        p = _sp.run(["keepassxc-cli", "show", "-k", kf, "--no-password", "-q",
+                     "--all", "--", db, entry],
+                    stdin=_sp.DEVNULL, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=30)
+    except Exception:
+        return None
+    if p.returncode != 0:
+        return None
+    out = p.stdout or ""
+    m = _re.search(r"otpauth://totp/[^\s'\"]+", out)
+    if m:
+        sm = _re.search(r"[?&]secret=([A-Z2-7=]+)", m.group(0), _re.IGNORECASE)
+        if sm:
+            return sm.group(1).upper()
+    m = _re.search(r"(?im)^\s*(?:TOTP\s*)?(?:Seed|Secret)\s*:\s*([A-Z2-7=\s]+)\s*$", out)
+    if m:
+        return _re.sub(r"\s+", "", m.group(1)).upper()
+    return None
 
 
 def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str) -> dict:
