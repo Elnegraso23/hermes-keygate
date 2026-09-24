@@ -85,7 +85,17 @@ En KeePassXC: duplica un ítem de tu personal → muévelo a `hermes.kdbx` →
 renómbralo a alias opaco (`github-agent-1`) → URL exacta del login → sin
 notas/adjuntos → guarda. Quitar acceso = borrar la copia (o cerrar la DB).
 
-## Uso diario
+## Uso diario (keygate es el default)
+
+El plugin instala la skill `keygate-default`: ante un *"logueate en <sitio>"*,
+Hermes primero mira el vault nativo; si falta el login, te pide el **alias**,
+lo importa con `keygate_import` (**una** aprobación) y rellena con el flujo
+nativo (ciego al modelo, atado al origen). Después, loguearse es directo.
+
+- `keygate_import(alias)` → copia UNA vez al vault cifrado local
+  (`keygate:<alias>`). Rotar = re-importar; quitar = Hermes vault settings.
+- `keygate_request_fill(alias, origin)` → modo estricto: aprobación por fill.
+- `keygate_search/status/version/doctor` → metadata, conteo, updates, diagnóstico.
 
 Pide en el chat (sesión nueva tras instalar):
 
