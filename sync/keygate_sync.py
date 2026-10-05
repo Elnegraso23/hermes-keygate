@@ -149,7 +149,16 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <h2>Aliases</h2>
 <div class="card" id="aliases"><div class="sub">Cargando…</div></div>
 
-<h2>Bajar y subir el hermes.kdbx</h2>
+<h2 id="primera">Primera vez (tu PC editor)</h2>
+<div class="card"><div class="sub" style="margin:0">
+1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
+2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
+3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos, guarda.<br>
+4. <a href="#bajar">Sube el .kdbx editado</a> (pide confirmación, deja backup).<br>
+De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ningún lado.
+</div></div>
+
+<h2 id="bajar">Bajar y subir el hermes.kdbx</h2>
 <div class="card">
 <div class="row">
 <button class="ghost" onclick="dl()">⬇ Descargar .kdbx actual</button>
@@ -161,7 +170,7 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <pre id="out">Sin subidas todavía.</pre>
 </div>
 
-<h2>Onboarding del .key</h2>
+<h2 id="onb">Onboarding del .key</h2>
 <div class="card"><div class="row">
 <span class="badge" id="obstate">…</span>
 <button class="ghost" id="obbtn" onclick="onboard()">Descargar .key (una sola vez)</button>
@@ -323,17 +332,22 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._send(500, {"success": False, "error": "keyfile unreadable"})
                 return
+            # Flag is set ONLY after the bytes leave the socket: a dropped
+            # connection must not burn the single shot.
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                return  # no flag: user may retry the one-time download
             flag.write_text(f"{int(time.time())}\n")
             try:
                 os.chmod(flag, 0o600)
             except Exception:
                 pass
             audit_ev(self._home(), {"ev": "sync", "action": "keyfile-served-once"})
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
             return
         if url.path == "/api/download":
             # Ciphertext only: useless without the host keyfile. Bearer-gated
