@@ -69,34 +69,31 @@ Dile al usuario:
 
 ### Paso 5 — Configurar Hermes (sin secretos)
 
-Agrega este bloque a `~/.hermes/config.yaml` (reemplaza TU-USUARIO por el real,
-obtenlo con `whoami`, no lo inventes):
+El agente NO edita `~/.hermes/config.yaml` a mano: usa el CLI (`hermes config
+set <clave> <valor>`, claves con puntos). Si una clave la rechaza por
+desconocida, reintenta con `--force` solo si la clave es del schema keygate:
 
-```yaml
-plugins:
-  enabled:
-    - keygate
-approvals:
-  mode: manual
-  timeout: 60
-  single_query_mode: deny
-secrets:
-  keepass:
-    enabled: true
-    db_path: "/home/TU-USUARIO/Documentos/hermes.kdbx"
-    keyfile: "/home/TU-USUARIO/.keepass-agent.key"
-    timeout_seconds: 30
-    env: {}
-browser:
-  backend: off
-  use_real_profile: false
+```bash
+hermes plugins enable keygate
+hermes config set approvals.mode manual
+hermes config set approvals.timeout 60
+hermes config set approvals.single_query_mode deny
+hermes config set secrets.keepass.enabled true
+hermes config set secrets.keepass.db_path "/home/TU-USUARIO/Documentos/hermes.kdbx"
+hermes config set secrets.keepass.keyfile "/home/TU-USUARIO/.keepass-agent.key"
+hermes config set secrets.keepass.timeout_seconds 30
+hermes config set browser.backend off
+hermes config set browser.use_real_profile false
 ```
 
-Reglas al editar el YAML:
+(TU-USUARIO = salida de `whoami`, no lo inventes.)
 
-- Lee el archivo primero, fusiona — nunca lo sobreescribas completo.
-- `env: {}` queda vacio a proposito: nada se expone al entorno.
+Reglas:
+
+- `secrets.keepass.env` queda vacio/no se toca: nada se expone al entorno.
 - `single_query_mode: deny` es intencional: sesiones `-q`/cron nunca auto-aprueban.
+- Solo como fallback (si el CLI no trae alguna clave) edita el YAML: lee el
+  archivo primero, fusiona — nunca lo sobreescribas completo.
 
 ### Paso 6 — Pedir reinicio (obligatorio)
 
