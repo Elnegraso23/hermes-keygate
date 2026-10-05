@@ -35,26 +35,36 @@ Cuando vuelvas, dile:
 
 Hermes verifica (`keygate_status` debe decir `{locked:false, entries:0}`).
 
-### 2. Crear tu primera cuenta en KeePassXC (2 minutos)
+### 2. Crear tu primera cuenta en la pagina local (2 minutos)
 
 Hermes NO puede crear credenciales (bloqueado por politica — es tu seguridad).
-Lo haces tu en KeePassXC:
+El camino es la pagina **http://127.0.0.1:8472** (Hermes la arranca por ti
+durante la instalacion; si no esta viva, pidela: "levanta la pagina de keygate"):
 
-1. Abre KeePassXC → abre `~/Documentos/hermes.kdbx`
-   (usa el keyfile `~/.keepass-agent.key`, no pide password).
-2. Nueva entrada:
+1. Abre http://127.0.0.1:8472. Te pide el Token: corre
+   `cat ~/.hermes/keygate-sync-token` en tu terminal y pegalo
+   (queda solo en esa pestaña, en ningun disco mas).
+2. Arriba veras la tarjeta **"Primera vez"**:
+   - ⬇ **Descarga el .kdbx** (vacio la primera vez).
+   - **Descarga el .key (una sola vez)** — guardalo con permisos 600 en tu PC.
+3. Abre el `.kdbx` en KeePassXC con ese `.key` (no pide password) y crea tu entrada:
    - **Titulo:** alias opaco, ej. `internet-agent-1`
      (opaco = que no revele el sitio si alguien ve la lista)
-   - **Usuario:** tu usuario real
-   - **Password:** tu password real
-   - **URL:** la URL EXACTA del login, ej. `https://the-internet.herokuapp.com/login`
-3. Guarda (Ctrl+S) y avisale a Hermes: `ya la cree`.
+   - **Usuario / Password:** tus credenciales reales
+   - **URL:** la URL EXACTA del login
+4. Guarda (Ctrl+S), vuelve a la pagina y **sube el .kdbx editado**
+   (pide confirmacion, deja backup automatico). Veras tu alias en la lista.
+5. Avisale a Hermes: `ya la subi`.
 
 > **Para probar sin cuentas reales:** usa el sitio publico
 > https://the-internet.herokuapp.com/login
 > con usuario `tomsmith` y password `SuperSecretPassword!`
 > (estan impresas en la pagina, son para practicar).
 > Alias sugerido: `internet-agent-1`.
+
+> **Alternativa (mismo PC, sin pagina):** abre directo
+> `~/Documentos/hermes.kdbx` en KeePassXC con `~/.keepass-agent.key`.
+> La pagina sigue siendo el camino normal.
 
 ### 3. Aprobar con un clic (cada login nuevo)
 
