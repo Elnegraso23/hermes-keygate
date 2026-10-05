@@ -121,21 +121,43 @@ y luego `keygate_status` via tool_search. Esperas ver:
 Si algo falla, corre `keygate_doctor` y lee su JSON — te dice exactamente
 que falta (version, DB, canal de aprobacion). Reporta el diagnostico, no adivines.
 
-### Paso 8 — Primera cuenta (la hace el USUARIO en KeePassXC)
+### Paso 8 — Primera credencial VIA LA WEB (camino principal)
 
-Tu NO creas credenciales (`keygate_alias_add` esta bloqueado por politica).
-Guia al usuario:
+NO mandes al usuario a buscar archivos a mano. La forma de primera vez es la
+pagina local `keygate-sync`, que ya trae la guia "Primera vez" integrada.
+Arranca el servidor asi (token nuevo solo si no existe; NUNCA imprimas el
+token en el chat — el usuario lo lee con `cat`):
 
-> "Abre KeePassXC y abre `~/Documentos/hermes.kdbx` (usa el keyfile
-> `~/.keepass-agent.key`, no pide password). Crea una entrada:
-> Titulo = alias opaco (ej. `internet-agent-1`), usuario, password,
-> URL exacta del login. Guarda y avisame."
+```bash
+test -f ~/.hermes/keygate-sync-token || { openssl rand -hex 24 > ~/.hermes/keygate-sync-token && chmod 600 ~/.hermes/keygate-sync-token; }
+KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
+KEYGATE_SYNC_TOKEN="$(cat ~/.hermes/keygate-sync-token)" \
+KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
+nohup python3 <REPO>/sync/keygate_sync.py >/tmp/keygate-sync.log 2>&1 &
+```
+
+(`<REPO>` = donde se clono, ej. `~/Projects/github/hermes-keygate`. Verifica
+que el proceso quedo vivo con `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8472/` → debe dar 200.)
+
+Dile al usuario, literal:
+
+> "Abre http://127.0.0.1:8472 en tu navegador. Te va a pedir el Token de
+> keygate-sync: corre `cat ~/.hermes/keygate-sync-token` en tu terminal y
+> pegalo (queda solo en esa pestaña). Arriba veras la tarjeta 'Primera vez':
+> 1) ⬇ Descarga el .kdbx, 2) Descarga el .key (una sola vez, guardalo 600),
+> 3) abre el .kdbx en KeePassXC con ese .key y añade tu cuenta (Titulo = alias
+> opaco ej. `internet-agent-1`, URL exacta del login), guarda, 4) sube el
+> .kdbx editado en la misma pagina. Avisame cuando la pagina muestre tu alias."
 
 Para probar sin cuentas reales, sugiere el sitio publico de pruebas:
 
 - URL: `https://the-internet.herokuapp.com/login`
 - Usuario: `tomsmith` / Password: `SuperSecretPassword!` (publicas, impresas en la pagina)
 - Alias sugerido: `internet-agent-1`
+
+Alternativa solo-si el usuario prefiere (mismo PC, KeePassXC a mano): abrir
+directo `~/Documentos/hermes.kdbx` con `~/.keepass-agent.key`. La web sigue
+siendo el camino por defecto — mencionala primero, siempre.
 
 ### Paso 9 — Primer login (flujo keygate-default)
 
@@ -169,3 +191,7 @@ Menciona `scripts/keygate-update` para futuras actualizaciones y el archivo
 - Modo estricto (usuario pide aprobacion por fill): usa `keygate_request_fill`
   en vez de import+fill.
 - El `.key` JAMAS viaja (ni sync, ni croc, ni chat). Solo el `.kdbx` como ciphertext.
+- El token de keygate-sync JAMAS se imprime en el chat ni en logs: el usuario
+  lo lee con `cat ~/.hermes/keygate-sync-token`.
+- La pagina localhost (`http://127.0.0.1:8472`) es el camino por defecto para
+  la primera credencial — mencionala siempre antes que los archivos sueltos.
