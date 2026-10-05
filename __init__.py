@@ -227,7 +227,9 @@ def register(ctx):
     ctx.register_secret_source(KeepassSource())
     try:
         from pathlib import Path as _P
-        ctx.register_skill("keygate-default", _P(__file__).resolve().parent / "skills" / "keygate-default")
+        _base = _P(__file__).resolve().parent / "skills"
+        ctx.register_skill("keygate-default", _base / "keygate-default")
+        ctx.register_skill("keygate-install", _base / "keygate-install")
     except Exception:
         pass
     try:
