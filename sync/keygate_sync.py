@@ -9,6 +9,7 @@ call, so changes apply instantly with no restart.
 Endpoints (all require `Authorization: Bearer $KEYGATE_SYNC_TOKEN`):
   GET  /                        status page (counts only, no secrets)
   GET  /api/aliases             [{alias, hint}] redacted metadata
+  GET  /api/download            current operative .kdbx bytes (ciphertext only)
   POST /api/upload              multipart file field `db` -> validate/backup/atomic replace
   GET  /api/onboarding/keyfile  ONE-TIME keyfile download, then 410 Gone forever
   GET  /api/audit?limit=N       last N audit lines (already redacted)
@@ -148,9 +149,13 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <h2>Aliases</h2>
 <div class="card" id="aliases"><div class="sub">Cargando…</div></div>
 
-<h2>Subir nuevo hermes.kdbx</h2>
+<h2>Bajar y subir el hermes.kdbx</h2>
 <div class="card">
-<div class="drop" id="drop">Arrastra el <code>.kdbx</code> aquí o haz clic para elegirlo
+<div class="row">
+<button class="ghost" onclick="dl()">⬇ Descargar .kdbx actual</button>
+<span class="sub" style="margin:0">Flujo: descarga → edita en KeePassXC (añade copias con alias opacos) → súbelo abajo. Solo viaja ciphertext; sin el .key no se abre.</span>
+</div>
+<div class="drop" id="drop" style="margin-top:10px">Arrastra el <code>.kdbx</code> editado aquí o haz clic para elegirlo
 <input type="file" id="f" accept=".kdbx" class="hide"></div>
 <div class="row" style="margin-top:10px"><button id="upbtn" onclick="up()">Subir y reemplazar</button></div>
 <pre id="out">Sin subidas todavía.</pre>
@@ -200,6 +205,13 @@ fi.onchange = () => drop.firstChild.textContent = 'Elegido: ' + (fi.files[0] ? f
 ['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.add('over');}));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', ev => { fi.files = ev.dataTransfer.files; fi.onchange(); });
+async function dl() {
+  const r = await fetch('/api/download', {headers: H});
+  if (!r.ok) { alert('Descarga falló: ' + r.status); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'hermes.kdbx'; a.click();
+}
 async function up() {
   const f = fi.files[0];
   if (!f) return alert('Elige primero el .kdbx (clic o arrastra)');
@@ -319,6 +331,25 @@ class Handler(BaseHTTPRequestHandler):
             audit_ev(self._home(), {"ev": "sync", "action": "keyfile-served-once"})
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if url.path == "/api/download":
+            # Ciphertext only: useless without the host keyfile. Bearer-gated
+            # like everything else; enables download -> edit in KeePassXC ->
+            # upload round-trip without touching the terminal.
+            try:
+                data = Path(db).read_bytes()
+            except Exception:
+                self._send(500, {"success": False, "error": "db unreadable"})
+                return
+            audit_ev(self._home(), {"ev": "sync", "action": "db-downloaded",
+                                    "bytes": len(data)})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition",
+                             'attachment; filename="hermes.kdbx"')
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
             self.wfile.write(data)

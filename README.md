@@ -164,8 +164,9 @@ cat ~/.hermes/keygate-sync-token
 * El servidor al arrancar te dice *dónde* está el token; nunca lo imprime ni
   lo loguea.
 
-`/api/aliases` redactados · `POST /api/upload` (valida KDBX+keyfile, rehúsa
-vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
+`/api/aliases` redactados · `GET /api/download` (baja el `.kdbx` actual:
+edítalo en KeePassXC y súbelo de vuelta — round-trip sin terminal) ·
+`POST /api/upload` (valida KDBX+keyfile, rehúsa vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
 (**una sola vez**, luego 410) · `/api/audit`. Todo con Bearer. La página no
 tiene ningún campo de password: solo mueve ciphertext.
 
