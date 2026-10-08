@@ -6,17 +6,26 @@ upload the ciphertext .kdbx. The server validates (opens with the host
 keyfile), backs up, and atomically replaces. keygate reads the file per
 call, so changes apply instantly with no restart.
 
-Endpoints (all require `Authorization: Bearer $KEYGATE_SYNC_TOKEN`):
-  GET  /                        status page (counts only, no secrets)
+Endpoints (all require `Authorization: Bearer <password>` unless noted):
+  GET  /                        status page (counts only, no secrets; public shell)
+  GET  /api/setup-state          public: {setup_required} (first visit forces password creation)
+  POST /api/set-password         {password} — allowed ONCE while no password set (min 12 chars)
   GET  /api/aliases             [{alias, hint}] redacted metadata
   GET  /api/download            current operative .kdbx bytes (ciphertext only)
   POST /api/upload              multipart file field `db` -> validate/backup/atomic replace
   GET  /api/onboarding/keyfile  ONE-TIME keyfile download, then 410 Gone forever
   GET  /api/audit?limit=N       last N audit lines (already redacted)
 
-Env: KEYGATE_DB, KEYGATE_KEYFILE, KEYGATE_SYNC_TOKEN (required),
-     KEYGATE_BIND (default 127.0.0.1), KEYGATE_PORT (default 8472),
-     KEYGATE_BACKUP_KEEP (default 5).
+Auth model: no default password, no token file. The first visit MUST create
+the password (min 12 chars, PBKDF2-HMAC-SHA256 210k + random salt, stdlib
+only, stored 0600 at ~/.hermes/keygate-sync-pass). Until then every /api/*
+except setup-state/set-password answers 403. The browser keeps it in
+sessionStorage of that tab only. A local terminal reader gains nothing from
+this either way (they can read the vault files directly) — the password
+protects REMOTE web access without a secret sitting on disk.
+
+Env: KEYGATE_DB, KEYGATE_KEYFILE, KEYGATE_BIND (default 127.0.0.1),
+     KEYGATE_PORT (default 8472), KEYGATE_BACKUP_KEEP (default 5).
 
 Stdlib only. Never bind 0.0.0.0 yourself — reach it over Tailscale/LAN.
 """
@@ -41,6 +50,60 @@ import keygate_lib as kg
 MAX_UPLOAD = 10 * 1024 * 1024
 RATE_MAX = 60  # requests per window per IP
 RATE_WINDOW = 60.0
+PW_MIN_LEN = 12
+PW_ITERS = 210_000
+
+
+def passfile(home: Path) -> Path:
+    return home / "keygate-sync-pass"
+
+
+def hash_pw(password: str, salt: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PW_ITERS)
+
+
+def password_is_set(home: Path) -> bool:
+    try:
+        d = json.loads(passfile(home).read_bytes().decode())
+        return bool(d.get("salt") and d.get("hash"))
+    except Exception:
+        return False
+
+
+def check_password(home: Path, given: str) -> bool:
+    try:
+        d = json.loads(passfile(home).read_bytes().decode())
+        salt = bytes.fromhex(d["salt"])
+        want = bytes.fromhex(d["hash"])
+    except Exception:
+        return False
+    if not given:
+        return False
+    return hmac.compare_digest(hash_pw(given, salt), want)
+
+
+def set_password_once(home: Path, password: str) -> bool:
+    """Create the password. Only when none exists (first visit)."""
+    if password_is_set(home):
+        return False
+    if not isinstance(password, str) or len(password) < PW_MIN_LEN:
+        return False
+    salt = os.urandom(32)
+    d = {"salt": salt.hex(), "hash": hash_pw(password, salt).hex(),
+         "iters": PW_ITERS, "set_at": int(time.time())}
+    pf = passfile(home)
+    pf.parent.mkdir(parents=True, exist_ok=True)  # ~/.hermes puede no existir aún
+    fd = os.open(str(pf), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        try:
+            pf.unlink()
+        except Exception:
+            pass
+        raise
+    return True
 
 
 def cfg():
@@ -139,6 +202,17 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <header><div class="logo">🔑</div><div><h1>keygate-sync</h1>
 <div class="sub">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></header>
 
+<div class="card" id="setupcard" style="display:none;border-color:var(--warn)">
+<h2 style="margin-top:0">Crea tu contraseña (primera y única vez)</h2>
+<div class="sub">No hay contraseña por defecto. Mínimo 12 caracteres. Se guarda con PBKDF2 en el host; aquí solo vive en esta pestaña.</div>
+<div class="row"><input type="password" id="pw1" placeholder="Nueva contraseña" style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)">
+<input type="password" id="pw2" placeholder="Repítela" style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)">
+<button onclick="kg_setup()">Crear</button></div>
+<pre id="setupout" style="display:none"></pre>
+</div>
+
+<div id="app" style="display:none">
+
 <div class="card"><div class="row">
 <span class="badge" id="dbstate">…</span>
 <span class="badge" id="count">… aliases</span>
@@ -181,16 +255,54 @@ De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ning
 
 <footer>keygate-sync · red local/Tailscale únicamente · todo cambio deja backup + audit</footer>
 </div>
+</div>
 <script>
-const t = sessionStorage.getItem('kg_t') || prompt('Token de keygate-sync:') || '';
-sessionStorage.setItem('kg_t', t);
-const H = {'Authorization': 'Bearer ' + t};
+function authHeaders() {
+  const t = sessionStorage.getItem('kg_t') || '';
+  return {'Authorization': 'Bearer ' + t};
+}
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function logout(){ sessionStorage.removeItem('kg_t'); location.reload(); }
+async function boot() {
+  let st = {};
+  try {
+    const r = await fetch('/api/setup-state');
+    st = await r.json();
+  } catch (e) { document.getElementById('setupout').style.display = 'block';
+    document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
+    document.getElementById('setupcard').style.display = 'block'; return; }
+  if (st.setup_required) { document.getElementById('setupcard').style.display = 'block'; return; }
+  document.getElementById('app').style.display = 'block';
+  if (!sessionStorage.getItem('kg_t')) {
+    const t = prompt('Contraseña de keygate-sync:') || '';
+    if (!t) return;
+    sessionStorage.setItem('kg_t', t);
+  }
+  load();
+}
+async function kg_setup() {
+  const a = document.getElementById('pw1').value, b = document.getElementById('pw2').value;
+  const out = document.getElementById('setupout'); out.style.display = 'block';
+  if (a.length < 12) { out.textContent = 'Mínimo 12 caracteres.'; return; }
+  if (a !== b) { out.textContent = 'No coinciden.'; return; }
+  try {
+    const r = await fetch('/api/set-password', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: a})});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { out.textContent = 'Falló: ' + (j.error || r.status); return; }
+  } catch (e) { out.textContent = 'Servidor no responde.'; return; }
+  sessionStorage.setItem('kg_t', a);
+  document.getElementById('pw1').value = document.getElementById('pw2').value = '';
+  document.getElementById('setupcard').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  load();
+}
 async function api(p, o) {
-  const r = await fetch(p, Object.assign({headers: H}, o));
+  const r = await fetch(p, Object.assign({headers: authHeaders()}, o));
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Token inválido, recarga e inténtalo de nuevo'); }
+  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Contraseña incorrecta, recarga e inténtalo de nuevo'); }
+  if (r.status === 403 && j.setup_required) { location.reload(); return {status: r.status, body: j}; }
   return {status: r.status, body: j};
 }
 async function load() {
@@ -215,11 +327,15 @@ fi.onchange = () => drop.firstChild.textContent = 'Elegido: ' + (fi.files[0] ? f
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', ev => { fi.files = ev.dataTransfer.files; fi.onchange(); });
 async function dl() {
-  const r = await fetch('/api/download', {headers: H});
-  if (!r.ok) { alert('Descarga falló: ' + r.status); return; }
-  const blob = await r.blob();
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = 'hermes.kdbx'; a.click();
+  try {
+    const r = await fetch('/api/download', {headers: authHeaders()});
+    if (!r.ok) { alert('Descarga falló: ' + r.status); return; }
+    const blob = await r.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'hermes.kdbx';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch (e) { alert('Servidor no responde. ¿Sigue corriendo keygate-sync?'); }
 }
 async function up() {
   const f = fi.files[0];
@@ -227,20 +343,20 @@ async function up() {
   if (!confirm('Reemplazar el operativo con ' + f.name + ' (' + f.size + ' bytes)? Se guarda backup.')) return;
   const fd = new FormData(); fd.append('db', f, 'hermes.kdbx');
   document.getElementById('out').textContent = 'Subiendo…';
-  const r = await fetch('/api/upload', {method: 'POST', headers: H, body: fd});
+  const r = await fetch('/api/upload', {method: 'POST', headers: authHeaders(), body: fd});
   document.getElementById('out').textContent = r.status + ' ' + await r.text();
   load();
 }
 async function onboard() {
   if (!confirm('Descargar el .key UNA SOLA VEZ y deshabilitar este botón para siempre?')) return;
-  const r = await fetch('/api/onboarding/keyfile', {headers: H});
+  const r = await fetch('/api/onboarding/keyfile', {headers: authHeaders()});
   if (!r.ok) { alert('Ya servido o error: ' + r.status); return; }
   const blob = await r.blob();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'keepass-agent.key'; a.click();
   alert('Guardado. Ponle permisos 600 y desactiva si tu browser pregunta. Este botón ya no funcionará.');
 }
-load();
+boot();
 </script></body></html>
 """
 
@@ -259,13 +375,11 @@ class Handler(BaseHTTPRequestHandler):
     def _home(self):
         return Path.home() / ".hermes"
 
-    def _authed(self, token: str) -> bool:
-        if not token:
-            return False
+    def _authed(self) -> bool:
         given = self.headers.get("Authorization", "")
         if not given.startswith("Bearer "):
             return False
-        return hmac.compare_digest(given[7:].strip(), token)
+        return check_password(self._home(), given[7:].strip())
 
     def _rate_ok(self) -> bool:
         ip = self.client_address[0]
@@ -283,23 +397,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _need_auth(self, token: str) -> bool:
+    def _need_auth(self) -> bool:
         if not self._rate_ok():
             self._send(429, {"success": False, "error": "rate limited"})
             return False
-        if not self._authed(token):
-            self._send(401, {"success": False, "error": "unauthorized"})
+        if not password_is_set(self._home()):
+            self._send(403, {"success": False, "error": "password not created yet",
+                             "setup_required": True})
+            return False
+        if not self._authed():
+            self._send(401, {"success": False, "error": "wrong password"})
             return False
         return True
 
     # -- routes --
     def do_GET(self):
-        db, kf, token, _b, _p, _k = self._cfg()
+        db, kf, _token, _b, _p, _k = self._cfg()
         url = urlparse(self.path)
         if url.path == "/":
             # Public shell on purpose: browsers can't send Authorization headers
             # on plain navigation. The page holds zero secrets; it prompts for
-            # the token and calls /api/* with it (those stay Bearer-gated).
+            # the password (or its creation) and calls /api/* with it.
             if not self._rate_ok():
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
@@ -310,7 +428,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if not self._need_auth(token):
+        if url.path == "/api/setup-state":
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            self._send(200, {"success": True,
+                             "setup_required": not password_is_set(self._home())})
+            return
+        if not self._need_auth():
             return
         if url.path == "/api/aliases":
             if kg.db_locked(db, kf):
@@ -382,9 +507,42 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"success": False, "error": "not found"})
 
     def do_POST(self):
-        db, kf, token, _b, _p, keep = self._cfg()
+        db, kf, _token, _b, _p, keep = self._cfg()
         url = urlparse(self.path)
-        if not self._need_auth(token):
+        if url.path == "/api/set-password":
+            # First visit only: creates the password (min 12 chars). Once set,
+            # this endpoint is dead (403) — no change/reset over the web.
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 1024:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                password = str(json.loads(self.rfile.read(length).decode()).get("password") or "")
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            if password_is_set(self._home()):
+                self._send(403, {"success": False, "error": "password already set"})
+                return
+            if len(password) < PW_MIN_LEN:
+                self._send(400, {"success": False,
+                                 "error": f"password must be >= {PW_MIN_LEN} chars"})
+                return
+            try:
+                set_password_once(self._home(), password)
+            except FileExistsError:
+                self._send(403, {"success": False, "error": "password already set"})
+                return
+            except Exception:
+                self._send(500, {"success": False, "error": "could not store password"})
+                return
+            audit_ev(self._home(), {"ev": "sync", "action": "password-created"})
+            self._send(200, {"success": True})
+            return
+        if not self._need_auth():
             return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_UPLOAD + 65536:
@@ -460,20 +618,22 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    db, kf, token, bind, port, _keep = cfg()
-    if not token or len(token) < 16:
-        print("KEYGATE_SYNC_TOKEN requerido (>=16 chars). Nada expuesto sin auth.", file=sys.stderr)
-        return 2
+    db, kf, _token, bind, port, _keep = cfg()
+    if os.environ.get("KEYGATE_SYNC_TOKEN"):
+        print("aviso: KEYGATE_SYNC_TOKEN ya no se usa (auth ahora por contraseña creada en primera visita).",
+              file=sys.stderr)
     if bind == "0.0.0.0":
         print("REFUSED: no bindees 0.0.0.0 — usa 127.0.0.1 o tu IP Tailscale.", file=sys.stderr)
         return 2
     if not Path(db).exists():
         print(f"DB no existe aún: {db} (corre keygate-setup primero)", file=sys.stderr)
+    home = Path.home() / ".hermes"
+    if not password_is_set(home):
+        print("Sin contraseña todavía: la primera visita a la pagina la crea (min 12, una sola vez).",
+              file=sys.stderr)
     srv = ThreadingHTTPServer((bind, port), Handler)
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
-    print("Token: el de KEYGATE_SYNC_TOKEN (no se imprime ni se loguea). "
-          "Remoto sin archivos: un SSH por Tailscale, `cat ~/.hermes/keygate-sync-token`, "
-          "guárdalo en el gestor de tu móvil. Jamás por chat (queda en historial).")
+    print("Auth por contraseña (PBKDF2, solo en tu navegador por pestaña). Jamás por chat (queda en historial).")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

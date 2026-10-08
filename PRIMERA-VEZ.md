@@ -41,9 +41,9 @@ Hermes NO puede crear credenciales (bloqueado por politica — es tu seguridad).
 El camino es la pagina **http://127.0.0.1:8472** (Hermes la arranca por ti
 durante la instalacion; si no esta viva, pidela: "levanta la pagina de keygate"):
 
-1. Abre http://127.0.0.1:8472. Te pide el Token: corre
-   `cat ~/.hermes/keygate-sync-token` en tu terminal y pegalo
-   (queda solo en esa pestaña, en ningun disco mas).
+1. Abre http://127.0.0.1:8472. La PRIMERA vez te obliga a crear una
+   contraseña (minimo 12 caracteres, una sola vez — despues ese paso muere
+   para siempre). Queda solo en esa pestaña, en ningun disco mas.
 2. Arriba veras la tarjeta **"Primera vez"**:
    - ⬇ **Descarga el .kdbx** (vacio la primera vez).
    - **Descarga el .key (una sola vez)** — guardalo con permisos 600 en tu PC.
