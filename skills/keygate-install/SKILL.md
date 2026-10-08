@@ -137,7 +137,10 @@ nohup python3 <REPO>/sync/keygate_sync.py >/tmp/keygate-sync.log 2>&1 &
 ```
 
 (`<REPO>` = donde se clono, ej. `~/Projects/github/hermes-keygate`. Verifica
-que el proceso quedo vivo con `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8472/` → debe dar 200.)
+que el proceso quedo vivo con `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8472/` → debe dar 200.
+Corre TODOS los comandos `hermes ...` con `timeout 20` por delante: el CLI
+puede quedarse esperando confirmacion y jamas debes bloquear la instalacion
+por eso — "rige en la proxima sesion" es suficiente.)
 
 Dile al usuario, literal:
 
