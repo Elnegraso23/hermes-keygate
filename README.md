@@ -1,5 +1,15 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 
+> **⚠️ ALFA (v0.3.0) — software fresco, con fallas conocidas.**
+> Esto funciona en la máquina del autor pero cambia rápido y a veces se rompe
+> (mira el historial: skills que no cargaban, rutas con comillas, botones mudos
+> — todo real, todo corregido en público). **No lo uses todavía para cuentas
+> críticas**: prueba con el sitio de pruebas o cuentas desechables, reporta en
+> [issues](https://github.com/Elnegraso23/hermes-keygate/issues) (qué esperabas,
+> JSON de la tool, últimas líneas del audit **sin secretos**), y actualiza
+> seguido (`scripts/keygate-update`). Mientras la versión sea `0.x`, cualquier
+> update puede cambiar comportamiento, nombres de tools o formato de config.
+
 Hermes se loguea en tus sitios **sin ver jamás tus contraseñas**: tú apruebas
 en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
 *1Password for Claude*, 100% open source y self-hosted.
@@ -190,6 +200,18 @@ bash ~/hermes-keygate/scripts/keygate-update   # pull + instala + verifica; rige
 - Issues: [github.com/Elnegraso23/hermes-keygate/issues](https://github.com/Elnegraso23/hermes-keygate/issues)
   (qué esperabas, JSON de la tool, últimas líneas del audit **sin secretos**).
 - Regla: los fixes solo tocan código/docs, jamás tu vault.
+
+## Versiones (alfa 0.x: todo puede cambiar)
+
+- La versión vive en `plugin.yaml` (`keygate_version` la reporta: instalada
+  vs repo + changelog; el modelo te avisa de updates).
+- Esquema: `0.x.y` sin promesas — `x` puede renombrar tools, cambiar config o
+  el flujo de auth. Lee `CHANGELOG.md` antes de actualizar si algo te importa.
+- `1.0` llegará cuando el flujo completo (instalar → primera cuenta por web →
+  login → sync) funcione tres veces seguidas sin intervención manual del autor.
+  Hasta entonces, asume fallas y reporta.
+- Tags `v0.x.y` marcan cada release en GitHub; el updater sigue commits
+  (`pull --ff-only`) y deja el marcador `.installed_commit` en tu instalación.
 
 ## Límites honestos
 
