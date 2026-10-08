@@ -79,11 +79,17 @@ hermes plugins list | grep -i keygate   # → enabled
 Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/`,
 el bloque de config, y (si quieres) DB/keyfile/token/audit. Nada queda en Hermes.
 
-## Dar cuentas (30s c/u, manual = seguridad)
+## Dar cuentas: por la pagina local (camino normal)
 
-En KeePassXC: duplica un ítem de tu personal → muévelo a `hermes.kdbx` →
-renómbralo a alias opaco (`github-agent-1`) → URL exacta del login → sin
-notas/adjuntos → guarda. Quitar acceso = borrar la copia (o cerrar la DB).
+El instalador (`keygate-install`) arranca `keygate-sync` y te manda a
+**http://127.0.0.1:8472**. La tarjeta *"Primera vez"* guia: ⬇ descarga el
+`.kdbx` (+ el `.key` una sola vez) → edita en KeePassXC (copias con alias
+opacos, URL exacta, sin notas/adjuntos) → sube el `.kdbx` (confirmacion +
+backup). Quitar acceso = borrar la copia (o cerrar la DB).
+
+Alternativa mismo-PC (sin pagina): abre `~/Documentos/hermes.kdbx` directo en
+KeePassXC con `~/.keepass-agent.key`. La pagina sigue siendo el camino normal —
+un agente que instale esto debe ofrecerla PRIMERO, siempre.
 
 ## Uso diario (keygate es el default)
 
