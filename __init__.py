@@ -228,8 +228,10 @@ def register(ctx):
     try:
         from pathlib import Path as _P
         _base = _P(__file__).resolve().parent / "skills"
-        ctx.register_skill("keygate-default", _base / "keygate-default")
-        ctx.register_skill("keygate-install", _base / "keygate-install")
+        # register_skill quiere el ARCHIVO SKILL.md, no el directorio
+        # (con el dir, exists() pasa pero leer revienta con Errno 21).
+        ctx.register_skill("keygate-default", _base / "keygate-default" / "SKILL.md")
+        ctx.register_skill("keygate-install", _base / "keygate-install" / "SKILL.md")
     except Exception as exc:
         # Visible, no silencioso: sin skills/ el agente queda sin
         # instrucciones (pasó de verdad: el instalador no copiaba skills/).
