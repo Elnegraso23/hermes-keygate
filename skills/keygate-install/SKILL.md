@@ -8,6 +8,13 @@ platforms: [linux, macos, windows]
 
 # Keygate: instalacion desde cero
 
+> **TL;DR innegociable (lee esto primero):**
+> 1. Copia codigo **+ `skills/`** (`ls .../skills/*/SKILL.md` debe mostrar 2 archivos).
+> 2. La primera credencial va por la **pagina localhost** (`http://127.0.0.1:8472`),
+>    NUNCA mandes al usuario a archivos sueltos como primer camino.
+> 3. Todo `hermes ...` con `timeout 20` por delante.
+> 4. Cierra la instalacion con el **Mensaje de cierre** de abajo, casi literal.
+
 Se activa cuando el usuario dice **"instalame este repo"**, **"instala keygate"**,
 **"quiero configurar keygate"** o cualquier variante de primera instalacion.
 
@@ -183,7 +190,7 @@ Cuando el usuario diga *"quiero entrar a <url>"*:
 
 Exito = `You logged into a secure area!` + audit `approval: accept`.
 
-### Paso 10 — Cierre
+### Paso 10 — Cierre (mensaje literal, no lo reescribas con tus palabras)
 
 Cuando el login funcione, dile:
 
@@ -193,6 +200,21 @@ Cuando el login funcione, dile:
 
 Menciona `scripts/keygate-update` para futuras actualizaciones y el archivo
 `PRIMERA-VEZ.md` del repo como referencia.
+
+### Mensaje de cierre de INSTALACION (pegalo casi literal al terminar de instalar)
+
+Al terminar los pasos 1–5, ANTES del reinicio, cierra con esto (adapta solo la
+ruta real del repo). NO lo sustituyas por instrucciones de KeePassXC manual —
+la pagina es el camino:
+
+> "Listo, hermes-keygate instalado: plugin habilitado, vault operativo creado
+> (keyfile-only, sin master) y config aplicada.
+> Ahora te toca (3 cosas):
+> 1. **Reinicia Hermes** (cierra y reabre el chat). Al volver dime 'ya reinicie'.
+> 2. **Tu primera cuenta va por la pagina http://127.0.0.1:8472** (la levanto
+>    yo al verificar): ahi descargas el .kdbx y el .key (una sola vez), editas
+>    en KeePassXC y subes el .kdbx. Sin terminal, sin buscar archivos.
+> 3. Cada sitio nuevo te pedira UN Accept. Nada de passwords en el chat, jamas."
 
 ## Reglas duras (nunca rompas estas)
 
