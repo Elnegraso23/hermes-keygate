@@ -147,34 +147,32 @@ su sitio, sin transferir nada.
 **Primario: web `keygate-sync`** (solo Tailscale/LAN, stdlib puro):
 
 ```bash
-openssl rand -hex 24 > ~/.hermes/keygate-sync-token && chmod 600 ~/.hermes/keygate-sync-token
 KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
-KEYGATE_SYNC_TOKEN="$(cat ~/.hermes/keygate-sync-token)" \
 KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
 python3 ~/hermes-keygate/sync/keygate_sync.py
-# NUNCA bindees 0.0.0.0. Sin token (>=16) no arranca.
+# NUNCA bindees 0.0.0.0.
 ```
 
-### El token: dónde está y cómo conseguirlo (local y remoto)
+### La contraseña: se crea en tu primera visita (sin default)
 
-La web te pedirá `Token de keygate-sync`: es su contraseña. Vive **solo** en
-el host, archivo `0600` — pégalo desde ahí:
+No hay password inicial ni archivo de token: al abrir la pagina por primera
+vez TE OBLIGA a crearla (minimo 12 caracteres, una sola vez — despues ese
+endpoint muere con 403). Se guarda con PBKDF2-HMAC-SHA256 + salt en
+`~/.hermes/keygate-sync-pass` (0600); en tu navegador vive solo en el
+`sessionStorage` de esa pestaña.
 
-```bash
-cat ~/.hermes/keygate-sync-token
-```
-
-* Queda en `sessionStorage` de esa pestaña, en ningún disco más.
-* **Remoto sin acceso a archivos**: un SSH por Tailscale, corre ese mismo
-  `cat`, guarda el token en el gestor de tu móvil. Una sola vez, para siempre.
+* **Sin ventana admin/admin**: no existe default adivinable; la primera visita
+  sin password solo deja crearla, nada mas (403 al resto).
 * **Jamás por Telegram/chat**: quedaría en historial y servidores de Telegram
   (la misma razón por la que nunca viajan passwords).
-* El servidor al arrancar te dice *dónde* está el token; nunca lo imprime ni
-  lo loguea.
+* Honesto: contra un lector con terminal en el host, password y token empatan
+  (puede leer el vault directo, la web le sobra). La contraseña protege el
+  acceso web REMOTO sin dejar secreto en disco.
 
-`/api/aliases` redactados · `GET /api/download` (baja el `.kdbx` actual:
-edítalo en KeePassXC y súbelo de vuelta — round-trip sin terminal) ·
-`POST /api/upload` (valida KDBX+keyfile, rehúsa vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
+`/api/setup-state` (publico: si falta crearla) · `/api/aliases` redactados ·
+`GET /api/download` (baja el `.kdbx` actual: edítalo en KeePassXC y súbelo de
+vuelta — round-trip sin terminal) · `POST /api/upload` (valida KDBX+keyfile,
+rehúsa vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`
 (**una sola vez**, luego 410) · `/api/audit`. Todo con Bearer. La página no
 tiene ningún campo de password: solo mueve ciphertext.
 

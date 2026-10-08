@@ -141,28 +141,27 @@ que falta (version, DB, canal de aprobacion). Reporta el diagnostico, no adivine
 
 NO mandes al usuario a buscar archivos a mano. La forma de primera vez es la
 pagina local `keygate-sync`, que ya trae la guia "Primera vez" integrada.
-Arranca el servidor asi (token nuevo solo si no existe; NUNCA imprimas el
-token en el chat — el usuario lo lee con `cat`):
+Arranca el servidor asi (SIN token: la auth ahora es contraseña creada en la
+primera visita; NUNCA pidas ni muestres contraseña alguna en el chat):
 
 ```bash
-test -f ~/.hermes/keygate-sync-token || { openssl rand -hex 24 > ~/.hermes/keygate-sync-token && chmod 600 ~/.hermes/keygate-sync-token; }
 KEYGATE_DB=~/Documentos/hermes.kdbx KEYGATE_KEYFILE=~/.keepass-agent.key \
-KEYGATE_SYNC_TOKEN="$(cat ~/.hermes/keygate-sync-token)" \
 KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=8472 \
 nohup python3 <REPO>/sync/keygate_sync.py >/tmp/keygate-sync.log 2>&1 &
 ```
 
-(`<REPO>` = donde se clono, ej. `~/Projects/github/hermes-keygate`. Verifica
-que el proceso quedo vivo con `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8472/` → debe dar 200.
+(`<REPO>` = donde se clono, ej. `~/Projects/github/hermes-keygate`. Guarda el
+PID (`$!`) y mata con `kill $PID` al terminar — no dejes procesos colgados.
+Verifica que quedo vivo con `curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8472/` → debe dar 200.
 Corre TODOS los comandos `hermes ...` con `timeout 20` por delante: el CLI
 puede quedarse esperando confirmacion y jamas debes bloquear la instalacion
 por eso — "rige en la proxima sesion" es suficiente.)
 
 Dile al usuario, literal:
 
-> "Abre http://127.0.0.1:8472 en tu navegador. Te va a pedir el Token de
-> keygate-sync: corre `cat ~/.hermes/keygate-sync-token` en tu terminal y
-> pegalo (queda solo en esa pestaña). Arriba veras la tarjeta 'Primera vez':
+> "Abre http://127.0.0.1:8472 en tu navegador. La PRIMERA vez te obliga a
+> crear una contraseña (minimo 12, una sola vez — despues ese paso muere).
+> Queda solo en esa pestaña. Arriba veras la tarjeta 'Primera vez':
 > 1) ⬇ Descarga el .kdbx, 2) Descarga el .key (una sola vez, guardalo 600),
 > 3) abre el .kdbx en KeePassXC con ese .key y añade tu cuenta (Titulo = alias
 > opaco ej. `internet-agent-1`, URL exacta del login), guarda, 4) sube el
@@ -225,7 +224,7 @@ la pagina es el camino:
 - Modo estricto (usuario pide aprobacion por fill): usa `keygate_request_fill`
   en vez de import+fill.
 - El `.key` JAMAS viaja (ni sync, ni croc, ni chat). Solo el `.kdbx` como ciphertext.
-- El token de keygate-sync JAMAS se imprime en el chat ni en logs: el usuario
-  lo lee con `cat ~/.hermes/keygate-sync-token`.
+- NUNCA pidas ni muestres la contraseña de keygate-sync en el chat ni en logs:
+  el usuario la crea y la teclea solo en la pagina.
 - La pagina localhost (`http://127.0.0.1:8472`) es el camino por defecto para
   la primera credencial — mencionala siempre antes que los archivos sueltos.
