@@ -4,7 +4,17 @@
 # Flujo: git pull --ff-only -> copia plugin -> sintaxis -> registro -> reporte.
 # Si algo falla, no toca nada (fail-closed) y te dice el paso exacto.
 set -euo pipefail
-REPO="$HOME/hermes-keygate"
+# REPO autodetectado: acepta $1 o busca ubicaciones comunes (el clon NO tiene
+# ruta fija; p.ej. ~/hermes-keygate o ~/Projects/github/hermes-keygate).
+if [ -n "${1:-}" ]; then
+  REPO="$1"
+elif [ -d "$HOME/hermes-keygate/.git" ]; then
+  REPO="$HOME/hermes-keygate"
+elif [ -d "$HOME/Projects/github/hermes-keygate/.git" ]; then
+  REPO="$HOME/Projects/github/hermes-keygate"
+else
+  echo "no encuentro el clon (pasa la ruta: keygate-update <repo>)" >&2; exit 2
+fi
 DEST="$HOME/.hermes/plugins/keygate"
 echo "== keygate-update =="
 [ -d "$REPO/.git" ] || { echo "no hay repo en $REPO" >&2; exit 2; }
@@ -19,12 +29,17 @@ if git -C "$REPO" diff --name-only "$BEFORE" "$AFTER" | grep -qE '\.(kdbx|key)$'
   exit 3
 fi
 mkdir -p "$DEST"
-for f in __init__.py keygate_lib.py plugin.yaml; do
+for f in __init__.py keygate_lib.py plugin.yaml skills/keygate-default/SKILL.md skills/keygate-install/SKILL.md; do
   [ -f "$REPO/$f" ] || { echo "falta $f en repo, abortando (instalación intacta)" >&2; exit 2; }
 done
 python3 -c "import ast; [ast.parse(open('$REPO/'+f).read()) for f in ['__init__.py','keygate_lib.py']]" \
   || { echo "sintaxis rota en update, abortando" >&2; exit 2; }
 cp "$REPO/__init__.py" "$REPO/keygate_lib.py" "$REPO/plugin.yaml" "$DEST/"
+# Los skills son instrucciones que el agente lee: sin ellos el plugin queda
+# mudo (register() no los encuentra). Se reinstalan siempre, completos.
+rm -rf "$DEST/skills"
+cp -r "$REPO/skills" "$DEST/skills"
+find "$DEST/skills" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 git -C "$REPO" rev-parse HEAD > "$DEST/.installed_commit"
 echo "instalado en $DEST. Rige en tu próxima sesión de hermes (reinicia el chat)."
 echo "seguimiento: reporta en https://github.com/Elnegraso23/hermes-keygate/issues"

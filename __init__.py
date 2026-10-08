@@ -230,8 +230,12 @@ def register(ctx):
         _base = _P(__file__).resolve().parent / "skills"
         ctx.register_skill("keygate-default", _base / "keygate-default")
         ctx.register_skill("keygate-install", _base / "keygate-install")
-    except Exception:
-        pass
+    except Exception as exc:
+        # Visible, no silencioso: sin skills/ el agente queda sin
+        # instrucciones (pasó de verdad: el instalador no copiaba skills/).
+        import logging as _logging
+        _logging.getLogger(__name__).warning("keygate skills no registrados (%s): "
+                                             "reinstala con skills/ incluido", exc)
     try:
         _vi = _version_info()
         if _vi.get("update_available"):

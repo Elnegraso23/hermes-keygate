@@ -42,8 +42,10 @@ hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
 
 # 1. Clona e instala el plugin
 git clone https://github.com/Elnegraso23/hermes-keygate.git ~/hermes-keygate
+# (en adelante ~/hermes-keygate = tu clon, ej. ~/Projects/github/hermes-keygate)
 mkdir -p ~/.hermes/plugins/keygate
 cp ~/hermes-keygate/__init__.py ~/hermes-keygate/keygate_lib.py ~/hermes-keygate/plugin.yaml ~/.hermes/plugins/keygate/
+rm -rf ~/.hermes/plugins/keygate/skills && cp -r ~/hermes-keygate/skills ~/.hermes/plugins/keygate/skills  # sin skills/ el plugin queda mudo
 hermes plugins enable keygate   # rige en la próxima sesión
 
 # 2. Crea el vault operativo (SIN master: Hermes nunca recibe password maestra)
