@@ -26,24 +26,32 @@ Una vez con la URL, di:
 
 Espera confirmacion antes de tocar nada.
 
-### Paso 2 — Clonar
+### Paso 2 — Clonar (o reutilizar + pull)
 
-Con `terminal` (o la tool de shell disponible), clona a `~/hermes-keygate`:
+Si el clon ya existe, NO lo re-clones: `git pull --ff-only` y sigue. Si no
+existe, clona a una ruta sensata (`~/hermes-keygate` o `~/Projects/github/hermes-keygate`):
 
 ```bash
 git clone <URL> ~/hermes-keygate
 ```
 
-Si el directorio ya existe, pregunta si lo sobreescribes (`git pull`) o usas otro destino.
-Reporta el resultado al usuario en una linea.
+Guarda la ruta real como `<REPO>` para el resto de los pasos.
 
-### Paso 3 — Instalar el plugin
+### Paso 3 — Instalar el plugin (codigo + skills, ambos obligatorios)
 
 ```bash
 mkdir -p ~/.hermes/plugins/keygate
-cp ~/hermes-keygate/__init__.py ~/hermes-keygate/keygate_lib.py ~/hermes-keygate/plugin.yaml ~/.hermes/plugins/keygate/
-hermes plugins enable keygate
+cp <REPO>/__init__.py <REPO>/keygate_lib.py <REPO>/plugin.yaml ~/.hermes/plugins/keygate/
+rm -rf ~/.hermes/plugins/keygate/skills
+cp -r <REPO>/skills ~/.hermes/plugins/keygate/skills
+timeout 20 hermes plugins enable keygate
+ls ~/.hermes/plugins/keygate/skills/*/SKILL.md
 ```
+
+Sin `skills/` el plugin queda MUDO: `register()` no encuentra las
+instrucciones y el agente no sabe ni instalar ni loguear (fallo real que ya
+paso). El `ls` final debe mostrar los dos `SKILL.md`; si no, la instalacion
+esta rota — no sigas.
 
 Dile al usuario:
 
@@ -53,7 +61,7 @@ Dile al usuario:
 ### Paso 4 — Crear el vault operativo (SIN master password)
 
 ```bash
-bash ~/hermes-keygate/scripts/keygate-setup
+bash <REPO>/scripts/keygate-setup
 ```
 
 Esto crea (verifica que existan despues):
