@@ -94,14 +94,15 @@ hermes config set approvals.mode manual
 hermes config set approvals.timeout 60
 hermes config set approvals.single_query_mode deny
 hermes config set secrets.keepass.enabled true
-hermes config set secrets.keepass.db_path "/home/TU-USUARIO/Documentos/hermes.kdbx"
-hermes config set secrets.keepass.keyfile "/home/TU-USUARIO/.keepass-agent.key"
+hermes config set secrets.keepass.db_path /home/TU-USUARIO/Documentos/hermes.kdbx
+hermes config set secrets.keepass.keyfile /home/TU-USUARIO/.keepass-agent.key
 hermes config set secrets.keepass.timeout_seconds 30
 hermes config set browser.backend off
 hermes config set browser.use_real_profile false
 ```
 
-(TU-USUARIO = salida de `whoami`, no lo inventes.)
+(TU-USUARIO = salida de `whoami`, no lo inventes. SIN comillas: `config set`
+guarda el valor literal y las comillas rompen las rutas.)
 
 Reglas:
 
