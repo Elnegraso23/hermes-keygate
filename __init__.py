@@ -282,6 +282,87 @@ def register(ctx):
         handler=h_search)
 
     # ---- keygate_request_fill: clarify approval + server-side CDP fill ----
+    def _preflight_tab(task_id: str, origin: str, db: str, kf: str, entry: str):
+        """Return None when a LIVE supervised tab is already on the bound
+        origin (approval may proceed), else a ready-made error dict —
+        WITHOUT prompting.
+
+        An approval must always mean an imminent fill. Burning one on a dead
+        tab (new-tab-page, loading, wrong site) is a UX bug AND trains the
+        user to click Accept blindly. Metadata only (URL field), no secrets.
+
+        Two hard rules learned the expensive way:
+        - `_current_page_origin` may return a STALE cached origin from a dead
+          session, so origin match alone is not enough: require a live
+          supervisor from SUPERVISOR_REGISTRY.
+        - NEVER create a browser session from a probe (cloud backends bill
+          session creation). Existing supervisors only.
+        """
+        try:
+            from agent.vault_store import normalize_origin
+            from tools.browser_vault_tool import _current_page_origin
+            from tools.browser_supervisor import SUPERVISOR_REGISTRY
+        except Exception:
+            return None  # cannot probe: let the fill decide (legacy behavior)
+        try:
+            from tools.browser_tool import _last_session_key
+        except Exception:
+            def _last_session_key(tid):
+                return tid or "default"
+        cands = []
+        for cand in (task_id, _last_session_key(task_id or "default"),
+                     "default", _last_session_key("default")):
+            cand = cand or "default"
+            if cand not in cands:
+                cands.append(cand)
+        live_origin = None
+        try:
+            reg = SUPERVISOR_REGISTRY or {}
+        except Exception:
+            reg = {}
+        for cand in cands:
+            try:
+                sup = reg.get(cand) if hasattr(reg, "get") else None
+            except Exception:
+                sup = None
+            if not sup:
+                continue
+            try:
+                if getattr(sup, "closed", False):
+                    continue
+                page = _current_page_origin(cand)
+            except Exception:
+                continue
+            if page:
+                live_origin = page
+                break
+        try:
+            want = normalize_origin(origin)
+        except Exception:
+            want = origin
+        try:
+            entry_url = kg.show_field(db, kf, entry, "url") or ""
+            bound = normalize_origin(entry_url) if entry_url else want
+        except Exception:
+            bound = want
+        if not live_origin:
+            return {"success": False, "error_type": "page_not_ready",
+                    "error": ("no live supervised browser tab found — open the login "
+                              "in the agent browser (browser_navigate) and retry. "
+                              "No approval was spent."),
+                    "hint": "navigate + snapshot first, fill second"}
+        pl = str(live_origin).lower()
+        if pl in ("", "about:blank") or pl.startswith(("chrome://", "about:", "edge://", "brave://")):
+            return {"success": False, "error_type": "page_not_ready", "page": live_origin,
+                    "error": (f"live tab is on {live_origin!r}, not a login page — navigate to {want} "
+                              "and retry. No approval was spent."),
+                    "hint": "navigate + snapshot first, fill second"}
+        if want and want.lower() not in pl and pl not in want.lower():
+            return {"success": False, "error_type": "domain_mismatch", "page": live_origin,
+                    "error": (f"live tab is on {live_origin!r}, fill asks for {want} — refused "
+                              "BEFORE approval (phishing guard). No approval was spent.")}
+        return None
+
     def h_fill(params, **kw):
         params = params or {}
         alias = str(params.get("alias") or "").strip()
@@ -293,6 +374,20 @@ def register(ctx):
         if kg.db_locked(db, kf):
             return json.dumps({"success": False, "locked": True,
                                "error": "operative DB locked — unlock hermes.kdbx locally"})
+
+        # 0) Pre-flight BEFORE any prompt: tab must already be bound.
+        entries = kg.list_entries(db, kf)
+        match = next((e for e in entries if e.split("/")[-1] == alias), None)
+        if not match:
+            return json.dumps({"success": False, "error": "alias not found in operative vault"})
+        pre = _preflight_tab(kw.get("task_id") or params.get("task_id") or "default",
+                             origin, db, kf, match)
+        if pre is not None:
+            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
+                               "origin": kg.redact_origin(origin),
+                               "decision": pre.get("error_type", "refused"),
+                               "approval": "not_asked"})
+            return json.dumps(pre)
 
         # 1) Human approval on the active session's own surface
         # (gateway buttons / CLI panel / Desktop) via the sanctioned
