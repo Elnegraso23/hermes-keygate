@@ -225,7 +225,8 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <div class="card" id="aliases"><div class="sub">Cargando…</div></div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
-<div class="card"><div class="sub" style="margin:0">
+<div class="card"><div class="sub" id="checklist">Verificando estado…</div>
+<div class="sub" style="margin:0">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
 3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos, guarda.<br>
@@ -322,12 +323,14 @@ async function load() {
   document.getElementById('obstate').textContent = '⚪ un solo uso (no se puede consultar sin consumirlo)';
   try {
     const ob = await api('/api/onboarding/state');
-    if (ob.body && ob.body.served) {
-      document.getElementById('obstate').textContent = '🔴 ya descargado — este botón murió para siempre';
-      document.getElementById('obstate').className = 'badge bad';
-      document.getElementById('obbtn').disabled = true;
-    }
-  } catch (e) { /* badge queda en estado neutro */ }
+    const served = !!(ob.body && ob.body.served);
+    if (served) { killOb(); }
+    const n = (b.items || []).length;
+    document.getElementById('checklist').innerHTML =
+      '✅ Contraseña creada (estás dentro)<br>' +
+      (n ? `✅ .kdbx con ${n} alias` : '⬜ .kdbx vacío — súbelo con tus copias') + '<br>' +
+      (served ? '✅ .key descargado (botón muerto)' : '⬜ .key sin descargar (una sola vez)');
+  } catch (e) { document.getElementById('checklist').textContent = 'No se pudo leer el estado.'; }
 }
 const drop = document.getElementById('drop'), fi = document.getElementById('f');
 drop.onclick = () => fi.click();
