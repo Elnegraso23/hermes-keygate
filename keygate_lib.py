@@ -81,9 +81,19 @@ DEFAULT_DB = str(Path.home() / "Documentos" / "hermes.kdbx")
 DEFAULT_KEYFILE = str(Path.home() / ".keepass-agent.key")
 
 
+def _clean_path(v: str) -> str:
+    """Strip whitespace + surrounding quotes agents keep smuggling in via
+    `hermes config set` (it stores values literally: '"..."' breaks every
+    keepassxc-cli call and surfaces as a phantom 'locked' DB)."""
+    v = (v or "").strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1].strip()
+    return os.path.expanduser(os.path.expandvars(v))
+
+
 def cfg_paths(cfg: dict) -> Tuple[str, str]:
-    db = str(cfg.get("db_path") or os.environ.get("KEYGATE_DB") or DEFAULT_DB)
-    kf = str(cfg.get("keyfile") or os.environ.get("KEYGATE_KEYFILE") or DEFAULT_KEYFILE)
+    db = _clean_path(str(cfg.get("db_path") or os.environ.get("KEYGATE_DB") or DEFAULT_DB))
+    kf = _clean_path(str(cfg.get("keyfile") or os.environ.get("KEYGATE_KEYFILE") or DEFAULT_KEYFILE))
     return db, kf
 
 
