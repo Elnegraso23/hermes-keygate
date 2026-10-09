@@ -282,6 +282,42 @@ def register(ctx):
         handler=h_search)
 
     # ---- keygate_request_fill: clarify approval + server-side CDP fill ----
+    def _browser_transport():
+        """Where would a fill's bytes go? Hostname class ONLY (local vs
+        cloud) — never the CDP URL (it can carry tokens). Driven by the
+        live supervisor registry; headless sessions report {"live": False}.
+        Local Chromium = bytes stay on this machine; cloud = they transit
+        the provider (model still never sees them)."""
+        from urllib.parse import urlparse as _up
+        try:
+            from tools.browser_supervisor import SUPERVISOR_REGISTRY as _reg
+        except Exception:
+            return {"live": False, "transport": "unknown"}
+        found = set()
+        try:
+            items = list((_reg._by_task or {}).items())
+        except Exception:
+            items = []
+        for _tid, sup in items:
+            try:
+                if getattr(sup, "closed", False):
+                    continue
+                th, lp = getattr(sup, "_thread", None), getattr(sup, "_loop", None)
+                if not (th is not None and th.is_alive() and lp is not None and lp.is_running()):
+                    continue
+                host = (_up(str(getattr(sup, "cdp_url", ""))).hostname or "").lower()
+                if host in ("127.0.0.1", "localhost", "::1"):
+                    found.add("local")
+                elif host:
+                    found.add("cloud")
+            except Exception:
+                continue
+        if not found:
+            return {"live": False, "transport": "none"}
+        if found == {"local"}:
+            return {"live": True, "transport": "local"}
+        return {"live": True, "transport": "cloud"}
+
     def _preflight_tab(task_id: str, origin: str, db: str, kf: str, entry: str):
         """Return None when a LIVE supervised tab is already on the bound
         origin (approval may proceed), else a ready-made error dict —
@@ -500,7 +536,8 @@ def register(ctx):
         out = {"success": True, "version": _version_info(),
                "db": {"locked": locked,
                       "entries": 0 if locked else len(kg.list_entries(db, kf))},
-               "channel": _channel_diag(), "audit_tail": []}
+               "channel": _channel_diag(), "browser": _browser_transport(),
+               "audit_tail": []}
         try:
             lines = (_home() / "keygate-audit.jsonl").read_text().splitlines()[-3:]
             out["audit_tail"] = lines
