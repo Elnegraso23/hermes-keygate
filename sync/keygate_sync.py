@@ -14,6 +14,7 @@ Endpoints (all require `Authorization: Bearer <password>` unless noted):
   GET  /api/download            current operative .kdbx bytes (ciphertext only)
   POST /api/upload              multipart file field `db` -> validate/backup/atomic replace
   GET  /api/onboarding/keyfile  ONE-TIME keyfile download, then 410 Gone forever
+  GET  /api/onboarding/state   {served} — non-consuming probe so the UI kills the button visibly
   GET  /api/audit?limit=N       last N audit lines (already redacted)
 
 Auth model: no default password, no token file. The first visit MUST create
@@ -319,6 +320,14 @@ async function load() {
   document.getElementById('audit').innerHTML = (a.body.lines || []).slice().reverse()
     .map(l => `<div>${esc(l)}</div>`).join('') || 'Sin eventos.';
   document.getElementById('obstate').textContent = '⚪ un solo uso (no se puede consultar sin consumirlo)';
+  try {
+    const ob = await api('/api/onboarding/state');
+    if (ob.body && ob.body.served) {
+      document.getElementById('obstate').textContent = '🔴 ya descargado — este botón murió para siempre';
+      document.getElementById('obstate').className = 'badge bad';
+      document.getElementById('obbtn').disabled = true;
+    }
+  } catch (e) { /* badge queda en estado neutro */ }
 }
 const drop = document.getElementById('drop'), fi = document.getElementById('f');
 drop.onclick = () => fi.click();
@@ -349,12 +358,24 @@ async function up() {
 }
 async function onboard() {
   if (!confirm('Descargar el .key UNA SOLA VEZ y deshabilitar este botón para siempre?')) return;
-  const r = await fetch('/api/onboarding/keyfile', {headers: authHeaders()});
-  if (!r.ok) { alert('Ya servido o error: ' + r.status); return; }
+  let r;
+  try {
+    r = await fetch('/api/onboarding/keyfile', {headers: authHeaders()});
+  } catch (e) { alert('Servidor no responde.'); return; }
+  if (r.status === 410) { alert('Este .key ya fue descargado (una sola vez). Si lo perdiste, genera un vault nuevo con keygate-setup.'); killOb(); return; }
+  if (!r.ok) { alert('Error: ' + r.status); return; }
   const blob = await r.blob();
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = 'keepass-agent.key'; a.click();
-  alert('Guardado. Ponle permisos 600 y desactiva si tu browser pregunta. Este botón ya no funcionará.');
+  a.href = URL.createObjectURL(blob); a.download = 'keepass-agent.key';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  killOb();
+  alert('Guardado. Ponle permisos 600. Este botón ya murió.');
+}
+function killOb() {
+  document.getElementById('obstate').textContent = '🔴 ya descargado — este botón murió para siempre';
+  document.getElementById('obstate').className = 'badge bad';
+  document.getElementById('obbtn').disabled = true;
 }
 boot();
 </script></body></html>
@@ -446,6 +467,12 @@ class Handler(BaseHTTPRequestHandler):
                      for e in kg.list_entries(db, kf)][:200]
             self._send(200, {"success": True, "locked": False,
                              "count": len(items), "items": items})
+            return
+        if url.path == "/api/onboarding/state":
+            # Non-consuming probe: tells the UI whether the one-time keyfile
+            # was already served, so the button can die VISIBLY.
+            flag = Path(db).parent / ".keygate-keyfile-served"
+            self._send(200, {"success": True, "served": flag.exists()})
             return
         if url.path == "/api/onboarding/keyfile":
             flag = Path(db).parent / ".keygate-keyfile-served"
