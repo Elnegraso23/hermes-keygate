@@ -16,6 +16,9 @@ else
   echo "-- keyfile exists: $KF"
 fi
 if [ ! -f "$DB" ]; then
+  # El directorio del vault puede no existir (server con home fresco, sin
+  # ~/Documentos): db-create falla con "No such file or directory" si no.
+  mkdir -p "$(dirname "$DB")"
   echo "-- creating operative DB (keyfile-only, no master password)"
   keepassxc-cli db-create --set-key-file "$KF" "$DB"
   chmod 600 "$DB"
