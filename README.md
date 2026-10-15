@@ -133,6 +133,44 @@ http://127.0.0.1:41777` (muere al cerrar el chat; quitá la línea después).
 Honesto: el override salta el stack local de Hermes completo — el modelo
 tampoco ve esa pestaña (solo handles), y vos tenés el control físico.
 
+## Dos equipos con Tailscale (el bot en un servidor, vos desde tu PC)
+
+Patrón típico: hablás con Hermes por **Telegram** (su gateway corre en un
+servidor, p.ej. `HOME=/opt/hermes`) y editás el vault desde tu PC. Una vez en
+el mismo tailnet:
+
+**En el servidor del bot** (por el chat de Telegram, sin delegar):
+
+```bash
+# 1. Requisitos: git, python3, keepassxc-cli (keepassxc), curl, tailscale
+tailscale ip -4 | head -1                                  # = IP del servidor
+# 2. Instalación completa EN EL SERVIDOR (el instalador hace pull solo).
+#    KEYGATE_BIND ata el sync web a la IP de Tailscale (nunca 0.0.0.0):
+KEYGATE_BIND=100.x.y.z bash ~/Projects/github/hermes-keygate/scripts/keygate-install.sh
+# 3. Workaround del browser (bug de socket de Hermes): unit systemd con el
+#    chromium DE ESE servidor + cdp_url. Ver sección del bug más arriba.
+ls ~/.hermes/tools/ | grep chromium                        # ruta real del binario
+```
+
+**Desde tu PC** (cualquier navegador del tailnet):
+
+```text
+http://100.x.y.z:8472   → creás la contraseña (primera visita), descargás el
+.key UNA VEZ (guardalo 600 acá), bajás el .kdbx, editás en KeePassXC, subís.
+```
+
+Reglas que sostienen el patrón:
+
+- **El vault operativo vive en el servidor** (donde keygate lee). Tu PC solo
+  edita copias vía la web; subir reemplaza atómicamente con backup.
+- **El `.key` de cada máquina nunca viaja**: el del servidor se genera allá y
+  se queda allá. El que bajás a tu PC es para editar; si lo perdés, se regenera
+  el vault (`keygate-setup`) y se re-sube.
+- **Credenciales reales, una sola casa**: no mantengas dos vaultes "activos".
+  El otro equipo puede quedarse con el plugin deshabilitado.
+- La contraseña del sync y el `.key` **nunca por Telegram/chat**: quedan en
+  historial y servidores de la plataforma.
+
 Desinstalar: `hermes plugins disable keygate`, borra
 `~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
 DB/keyfile/pass/audit. Nada queda en Hermes.
