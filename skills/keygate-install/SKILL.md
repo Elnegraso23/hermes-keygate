@@ -82,6 +82,22 @@ Si pides fill con la página cargando o en pestaña muerta, recibirás
 `page_not_ready`/`domain_mismatch` **antes** de gastar aprobación: navega,
 verifica y reintenta. Las aprobaciones nunca se queman.
 
+### Si el browser falla con el bug de socket de Hermes
+
+Síntoma: `browser_navigate` → *"Session name 'hermes_local-…' is too long.
+Socket path would be >103 bytes"*. Es bug upstream de Hermes (id de sesión
+`local-<64hex>` + agent-browser), NO de keygate. Workaround verificado: apuntá
+`browser.cdp_url` a un Chromium propio (así lo ves en vivo):
+
+```bash
+~/.hermes/tools/chromium-*/chrome-linux64/chrome --headless=new \
+  --remote-debugging-port=41777 --no-sandbox \
+  --user-data-dir=/tmp/keygate-browser "https://the-internet.herokuapp.com/login" &
+hermes config set browser.cdp_url http://127.0.0.1:41777
+```
+
+(El modelo tampoco ve esa pestaña: solo handles. Quitá la config después.)
+
 ### Paso 4 — Cierre (casi literal)
 
 > "Listo, keygate instalado y verificado. Desde ahora dime 'quiero entrar a
