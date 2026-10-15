@@ -13,6 +13,9 @@ command -v croc >/dev/null || { echo "instala croc primero: sudo apt install cro
 [ -f "$KF" ] || { echo "falta keyfile local: $KF (nunca viaja por croc)" >&2; exit 2; }
 STAGEDIR="$(mktemp -d)"
 echo "== keygate-pull =="
+# El dir del vault puede no existir (host fresco sin ~/Documentos): crearlo
+# ANTES del mv o el reemplazo muere con "No such file or directory".
+mkdir -p "$(dirname "$DB")"
 croc --yes --overwrite --out "$STAGEDIR" "$CODE" >/dev/null || { echo "recv falló" >&2; rm -rf "$STAGEDIR"; exit 2; }
 STAGE="$STAGEDIR/$(basename "$DB")"
 [ -f "$STAGE" ] || { echo "staging vacío, abortando (actual intacto)" >&2; rm -rf "$STAGEDIR"; exit 2; }
