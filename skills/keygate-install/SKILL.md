@@ -86,17 +86,15 @@ verifica y reintenta. Las aprobaciones nunca se queman.
 
 Síntoma: `browser_navigate` → *"Session name 'hermes_local-…' is too long.
 Socket path would be >103 bytes"*. Es bug upstream de Hermes (id de sesión
-`local-<64hex>` + agent-browser), NO de keygate. Workaround verificado: apuntá
-`browser.cdp_url` a un Chromium propio (así lo ves en vivo):
-
-```bash
-~/.hermes/tools/chromium-*/chrome-linux64/chrome --headless=new \
-  --remote-debugging-port=41777 --no-sandbox \
-  --user-data-dir=/tmp/keygate-browser "https://the-internet.herokuapp.com/login" &
-hermes config set browser.cdp_url http://127.0.0.1:41777
-```
-
-(El modelo tampoco ve esa pestaña: solo handles. Quitá la config después.)
+`local-<64hex>` + agent-browser), NO de keygate: sin tmpdir que lo salve
+(2×86+21=193>103 siempre) y sin update que lo arregle (verificado en
+origin/main). Workaround verificado: apuntá `browser.cdp_url` a un Chromium
+propio — durable con un unit systemd de usuario
+(`~/.config/systemd/user/hermes-cdp-chromium.service`: headless en
+127.0.0.1:9222, perfil desechable, `Restart=always`, `enable --now` +
+`loginctl enable-linger`), más `browser.cloud_provider local` +
+`browser.cdp_url http://127.0.0.1:9222`. El modelo tampoco ve esa pestaña:
+solo handles. Detalle completo en el README (sección del bug de socket).
 
 ### Paso 4 — Cierre (casi literal)
 
