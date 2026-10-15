@@ -54,13 +54,21 @@ run config set browser.backend off
 run config set browser.use_real_profile false
 
 # 5. Start keygate-sync (idempotent: kill any old instance on this port).
-# KEYGATE_BIND respeta tu elección: 127.0.0.1 (default, solo esta máquina) o la
-# IP de Tailscale (100.x.y.z) para manejar el vault desde otro equipo.
+# Bind: KEYGATE_BIND explícito manda; si no, auto-detecta la IP de Tailscale
+# (así el vault se maneja desde otro equipo sin configuring nada); si no hay
+# Tailscale, 127.0.0.1. NUNCA 0.0.0.0 (el server lo rehúsa igual).
 if pgrep -f "keygate_sync.py" >/dev/null 2>&1; then
   pkill -f "keygate_sync.py" 2>/dev/null || true
   sleep 1
 fi
-BIND="${KEYGATE_BIND:-127.0.0.1}"
+if [ -n "${KEYGATE_BIND:-}" ]; then
+  BIND="$KEYGATE_BIND"
+elif command -v tailscale >/dev/null 2>&1; then
+  TS_IP="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1 || true)"
+  if [ -n "$TS_IP" ]; then BIND="$TS_IP"; say "Tailscale detectado: $TS_IP"; else BIND="127.0.0.1"; fi
+else
+  BIND="127.0.0.1"
+fi
 KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
 KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
 setsid python3 "$REPO/sync/keygate_sync.py" \
@@ -86,6 +94,12 @@ Lo que haces ahora:
    edita en KeePassXC con ese .key, sube el .kdbx editado.
 3) Si querés el login de prueba: https://the-internet.herokuapp.com/login
    (usuario tomsmith · password SuperSecretPassword! — públicos).
+
+Para cambiar el bind después (sin reinstalar todo):
+pkill -f keygate_sync.py
+KEYGATE_DB="\$DB" KEYGATE_KEYFILE="\$KF" KEYGATE_BIND=127.0.0.1 \\
+  KEYGATE_PORT=8472 setsid python3 "\$REPO/sync/keygate_sync.py" \\
+  >/tmp/keygate-sync.log 2>&1 < /dev/null &
 
 El plugin rige ya en esta sesión si hermes cargó el plugin activo; si no,
 reinicia el chat y verifica con keygate_status.
