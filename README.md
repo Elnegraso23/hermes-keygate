@@ -82,6 +82,34 @@ browser.use_real_profile false
 Verifica: `hermes plugins list | grep -i keygate` → `enabled`; en el chat,
 `keygate_status` debe decir `{locked:false, entries:0}`.
 
+## Si el browser de Hermes no abre (bug de socket upstream)
+
+Síntoma: `browser_navigate` falla con *"Session name 'hermes_local-…' is too
+long. Socket path would be >103 bytes"*. Es un bug de Hermes (su id de sesión
+creció a `local-<64hex>` y el binario agent-browser arma un socket Unix largo);
+**no es de keygate**. El fill de keygate no lo toca, pero necesita una pestaña
+viva.
+
+Workaround verificado (2026-10-15, llenó 2 campos y el password jamás salió al
+modelo): apuntá `browser.cdp_url` a un Chromium propio que **tú** controlás —
+así además VES el login en vivo:
+
+```bash
+# 1. Tu Chromium visible (puerto libre cualquiera)
+~/.hermes/tools/chromium-*/chrome-linux64/chrome \
+  --headless=new --remote-debugging-port=41777 --no-sandbox \
+  --user-data-dir=/tmp/keygate-browser "https://the-internet.herokuapp.com/login" &
+
+# 2. Hermes se conecta a ESE browser en vez del agent-browser roto
+hermes config set browser.cdp_url http://127.0.0.1:41777
+
+# 3. Pedí el login; el fill cae en la pestaña de arriba
+#    (quitá la línea después: edita config.yaml o `hermes config set browser.cdp_url ""`)
+```
+
+Honesto: el override salta el stack local de Hermes completo — el modelo
+tampoco ve esa pestaña (solo handles), y vos tenés el control físico.
+
 Desinstalar: `hermes plugins disable keygate`, borra
 `~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
 DB/keyfile/pass/audit. Nada queda en Hermes.
