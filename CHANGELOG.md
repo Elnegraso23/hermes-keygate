@@ -4,6 +4,14 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.4.0 — 2026-10-15
+- `keygate_version` avisa de updates contra GitHub aunque no tengas clon
+  (GET público a `plugin.yaml` de main, cache 24h, offline = `unknown`).
+- Rutas de clon autodetectadas (`~/hermes-keygate`,
+  `~/Projects/github/hermes-keygate`); el hardcode `~/hermes-keygate` murió.
+- Docs: setup CDP persistente por systemd contra el bug de socket de Hermes;
+  README lidera con el instalador de una pasada.
+
 ## 0.3.0 — 2026-10-08
 - Web `keygate-sync` con auth por **contraseña creada en primera visita**
   (PBKDF2-HMAC-SHA256, sin default, sin token en disco). Adiós `KEYGATE_SYNC_TOKEN`.

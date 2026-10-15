@@ -1,6 +1,6 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 
-> **⚠️ ALFA (v0.3.0) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.4.0) — software fresco, con fallas conocidas.**
 > Esto funciona en la máquina del autor pero cambia rápido y a veces se rompe
 > (mira el historial: skills que no cargaban, rutas con comillas, botones mudos
 > — todo real, todo corregido en público). **No lo uses todavía para cuentas
@@ -251,6 +251,10 @@ bash ~/hermes-keygate/scripts/keygate-update   # pull + instala + verifica; rige
 
 - La versión vive en `plugin.yaml` (`keygate_version` la reporta: instalada
   vs repo + changelog; el modelo te avisa de updates).
+- Desde 0.4.0 el plugin también pregunta a GitHub (raw `plugin.yaml` de main)
+  aunque no tengas clon: 1 GET público, stdlib, 10s timeout, cacheado 24h en
+  `~/.hermes/keygate-version-check.json`. Sin red responde `unknown` sin
+  romper nada. Si hay versión mayor, `update_available: true` + `update_hint`.
 - Esquema: `0.x.y` sin promesas — `x` puede renombrar tools, cambiar config o
   el flujo de auth. Lee `CHANGELOG.md` antes de actualizar si algo te importa.
 - `1.0` llegará cuando el flujo completo (instalar → primera cuenta por web →
