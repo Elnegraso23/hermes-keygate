@@ -92,20 +92,43 @@ viva.
 
 Workaround verificado (2026-10-15, llenó 2 campos y el password jamás salió al
 modelo): apuntá `browser.cdp_url` a un Chromium propio que **tú** controlás —
-así además VES el login en vivo:
+así además VES el login en vivo.
+
+**Duradero (recomendado): Chromium como servicio systemd de usuario** — sobrevive
+cierres de chat y reinicios (con `lingering`):
+
+```ini
+# ~/.config/systemd/user/hermes-cdp-chromium.service
+[Unit]
+Description=Hermes CDP Chromium (endpoint for browser.cdp_url / keygate fills)
+After=default.target
+[Service]
+Type=simple
+ExecStart=/home/TU-USUARIO/.hermes/tools/chromium-1208/chrome-linux64/chrome \
+  --headless=new --remote-debugging-port=9222 \
+  --remote-debugging-address=127.0.0.1 \
+  --user-data-dir=/home/TU-USUARIO/.local/share/hermes-cdp/profile \
+  --no-first-run --no-default-browser-check --disable-gpu about:blank
+Restart=always
+RestartSec=3
+# Perfil dedicado desechable: sin tus datos, bookmarks ni cookies.
+[Install]
+WantedBy=default.target
+```
 
 ```bash
-# 1. Tu Chromium visible (puerto libre cualquiera)
-~/.hermes/tools/chromium-*/chrome-linux64/chrome \
-  --headless=new --remote-debugging-port=41777 --no-sandbox \
-  --user-data-dir=/tmp/keygate-browser "https://the-internet.herokuapp.com/login" &
-
-# 2. Hermes se conecta a ESE browser en vez del agent-browser roto
-hermes config set browser.cdp_url http://127.0.0.1:41777
-
-# 3. Pedí el login; el fill cae en la pestaña de arriba
-#    (quitá la línea después: edita config.yaml o `hermes config set browser.cdp_url ""`)
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-cdp-chromium.service
+loginctl enable-linger   # arranca al boot sin sesión abierta
+hermes config set browser.cloud_provider local
+hermes config set browser.cdp_url http://127.0.0.1:9222
+# Útiles: systemctl --user status hermes-cdp-chromium.service
+#         journalctl --user -u hermes-cdp-chromium -n 50
 ```
+
+**Temporal (una prueba):** lanzá el Chromium a mano con
+`--remote-debugging-port=41777` y `hermes config set browser.cdp_url
+http://127.0.0.1:41777` (muere al cerrar el chat; quitá la línea después).
 
 Honesto: el override salta el stack local de Hermes completo — el modelo
 tampoco ve esa pestaña (solo handles), y vos tenés el control físico.
