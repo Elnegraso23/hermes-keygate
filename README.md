@@ -46,50 +46,45 @@ hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
 
 ## Instalación
 
+> **🤖 Si eres un agente instalando esto: ejecuta
+> `bash <repo>/scripts/keygate-install.sh` y pega su salida. NO hagas los
+> pasos a mano ni preguntes qué paso seguir: el script hace todo (repo,
+> plugin + skills, vault, config, sync) y termina con un bloque `== LISTO ==`.**
+>
+> El script es idempotente (puedes re-correrlo), no toca tu vault personal,
+> no pide ni genera contraseñas maestras y jamás recibe credenciales.
+
+**Requisitos:** `keepassxc` (aporta `keepassxc-cli`) + Hermes Agent con
+browser local. Opcional: `croc` (solo sync remoto sin web).
+
 ```bash
-# Requisitos: keepassxc (aporta keepassxc-cli) + Hermes Agent con browser local.
-# Opcional: croc (solo sync remoto sin web).
+# 1. (Solo para humanos que quieran entender los pasos — los agentes: usen
+#    el comando de arriba.)
+git clone https://github.com/Elnegraso23/hermes-keygate.git ~/Projects/github/hermes-keygate
+cd ~/Projects/github/hermes-keygate && bash scripts/keygate-install.sh
 
-# 1. Clona e instala el plugin
-git clone https://github.com/Elnegraso23/hermes-keygate.git ~/hermes-keygate
-# (en adelante ~/hermes-keygate = tu clon, ej. ~/Projects/github/hermes-keygate)
-mkdir -p ~/.hermes/plugins/keygate
-cp ~/hermes-keygate/__init__.py ~/hermes-keygate/keygate_lib.py ~/hermes-keygate/plugin.yaml ~/.hermes/plugins/keygate/
-rm -rf ~/.hermes/plugins/keygate/skills && cp -r ~/hermes-keygate/skills ~/.hermes/plugins/keygate/skills  # sin skills/ el plugin queda mudo
-hermes plugins enable keygate   # rige en la próxima sesión
-
-# 2. Crea el vault operativo (SIN master: Hermes nunca recibe password maestra)
-bash ~/hermes-keygate/scripts/keygate-setup
-# → ~/.keepass-agent.key (0600) + ~/Documentos/hermes.kdbx + perfil ~/.config/keepassxc-agent.ini
-
-# 3. Configura ~/.hermes/config.yaml (sin secretos):
-plugins:
-  enabled:
-    - keygate
-approvals:
-  mode: manual
-  timeout: 60
-  cron_mode: deny
-  single_query_mode: deny
-secrets:
-  keepass:
-    enabled: true
-    db_path: "/home/TU-USUARIO/Documentos/hermes.kdbx"
-    keyfile: "/home/TU-USUARIO/.keepass-agent.key"
-    timeout_seconds: 30
-    env: {}
-browser:
-  backend: "off"            # tools browser_* built-in, no Browser Use cloud
-  use_real_profile: false   # Chromium empaquetado, no exige tu navegador
-# allow_private_urls déjalo en false: el agente no toca loopback/red privada.
-
-# 4. Verifica (sin modelo ni browser):
-hermes plugins list | grep -i keygate   # → enabled
-# En tu próximo chat, keygate_status debe decir {locked:false, entries:0}
+# Lo que hace el script, paso por paso (a mano solo si insistes):
+#   a. clona/pull del repo
+#   b. copia __init__.py + keygate_lib.py + plugin.yaml + skills/ (sin
+#      skills/ el plugin queda MUDO: el agente no recibe instrucciones)
+#   c. hermes plugins enable keygate
+#   d. scripts/keygate-setup  → ~/.keepass-agent.key (0600) +
+#      ~/Documentos/hermes.kdbx (keyfile-only, SIN master) + perfil aislado
+#   e. hermes config set (sin comillas — con comillas las rutas se rompen):
+approvals.mode manual          → approvals.timeout 60
+approvals.single_query_mode deny → secrets.keepass.enabled true
+secrets.keepass.db_path …      → secrets.keepass.keyfile …
+secrets.keepass.timeout_seconds 30 → browser.backend off
+browser.use_real_profile false
+#   f. arranca keygate-sync en http://127.0.0.1:8472
 ```
 
-Desinstalar: `hermes plugins disable keygate`, borra `~/.hermes/plugins/keygate/`,
-el bloque de config, y (si quieres) DB/keyfile/token/audit. Nada queda en Hermes.
+Verifica: `hermes plugins list | grep -i keygate` → `enabled`; en el chat,
+`keygate_status` debe decir `{locked:false, entries:0}`.
+
+Desinstalar: `hermes plugins disable keygate`, borra
+`~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
+DB/keyfile/pass/audit. Nada queda en Hermes.
 
 ## Dar cuentas: por la pagina local (camino normal)
 
