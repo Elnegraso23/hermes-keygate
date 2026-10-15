@@ -181,13 +181,88 @@ def _channel_diag() -> dict:
     return d
 
 
+REMOTE_VERSION_URL = ("https://raw.githubusercontent.com/Elnegraso23/"
+                        "hermes-keygate/main/plugin.yaml")
+VERSION_CHECK_TTL = 24 * 3600  # re-check GitHub at most once a day
+VERSION_CHECK_TIMEOUT = 10
+
+
+def _parse_version(text: str):
+    """'0.3.0' -> (0, 3, 0). None when not parseable (never crash on it)."""
+    try:
+        parts = str(text or "").strip().strip('"').strip("'").split(".")
+        return tuple(int(p) for p in parts[:3])
+    except Exception:
+        return None
+
+
+def _remote_version(home) -> dict:
+    """Latest published version from GitHub, cached 24h.
+
+    Public GET of plugin.yaml on main (no secrets, no user data, stdlib
+    urllib, 10s timeout). Offline/failure -> {"remote_version": "unknown"}:
+    the tool reports, never breaks. Cache lives next to the audit log.
+    """
+    from pathlib import Path as _P
+    cache = _P(home) / "keygate-version-check.json"
+    now = 0
+    try:
+        import time as _t
+        now = int(_t.time())
+    except Exception:
+        pass
+    try:
+        d = json.loads(cache.read_text())
+        if d.get("remote_version") and now and now - int(d.get("checked_at", 0)) < VERSION_CHECK_TTL:
+            return {"remote_version": d["remote_version"],
+                    "remote_checked_at": int(d.get("checked_at", 0)),
+                    "remote_cached": True}
+    except Exception:
+        pass
+    out = {"remote_version": "unknown", "remote_checked_at": now, "remote_cached": False}
+    try:
+        import urllib.request as _u
+        req = _u.Request(REMOTE_VERSION_URL,
+                         headers={"User-Agent": "hermes-keygate/version-check"})
+        with _u.urlopen(req, timeout=VERSION_CHECK_TIMEOUT) as r:
+            body = r.read(4096).decode("utf-8", errors="replace")
+        for line in body.splitlines():
+            if line.strip().startswith("version:"):
+                out["remote_version"] = line.split(":", 1)[1].strip().strip('"').strip("'")
+                break
+    except Exception:
+        return out  # offline or GitHub down: unknown, tool still answers
+    try:
+        cache.write_text(json.dumps({"remote_version": out["remote_version"],
+                                     "checked_at": now}))
+        try:
+            os.chmod(cache, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return out
+
+
+def _find_repo():
+    """Clon actual (misma autodetección que scripts/keygate-update)."""
+    from pathlib import Path as _P
+    for cand in (Path.home() / "hermes-keygate",
+                 Path.home() / "Projects" / "github" / "hermes-keygate"):
+        if (cand / ".git").is_dir():
+            return cand
+    return None
+
+
 def _version_info() -> dict:
-    """Installed vs repo version for Hermes: update notices + changelog.
+    """Installed vs published version for Hermes: update notices + changelog.
     Updates never touch vaults (enforced in scripts/keygate-update)."""
     here = Path(__file__).resolve().parent
+    home = _home()
     info: dict = {"installed_version": "unknown", "installed_commit": "unknown",
                   "repo_head": None, "repo_version": None,
-                  "update_available": False, "changelog": []}
+                  "remote_version": "unknown", "remote_cached": False,
+                  "update_available": False, "update_hint": "", "changelog": []}
     try:
         for line in (here / "plugin.yaml").read_text().splitlines():
             if line.strip().startswith("version:"):
@@ -198,11 +273,13 @@ def _version_info() -> dict:
         info["installed_commit"] = (here / ".installed_commit").read_text().strip()[:12]
     except Exception:
         pass
-    repo = Path.home() / "hermes-keygate"
+    repo = _find_repo()
     try:
         import subprocess as _sp
-        head = _sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                       capture_output=True, text=True, timeout=10).stdout.strip()
+        head = ""
+        if repo is not None:
+            head = _sp.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=10).stdout.strip()
         if head:
             info["repo_head"] = head[:12]
             for line in (repo / "plugin.yaml").read_text().splitlines():
@@ -220,6 +297,17 @@ def _version_info() -> dict:
                 info["update_available"] = True
     except Exception:
         pass
+    # Remote check: works with NO local clone (the normal case).
+    remote = _remote_version(home)
+    info.update(remote)
+    inst_v = _parse_version(info["installed_version"])
+    rem_v = _parse_version(info["remote_version"])
+    if inst_v and rem_v and rem_v > inst_v:
+        info["update_available"] = True
+    if info["update_available"]:
+        info["update_hint"] = ("run scripts/keygate-update from your clone "
+                               "(or bash scripts/keygate-install.sh to reinstall); "
+                               "takes effect next chat session")
     return info
 
 
