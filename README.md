@@ -137,6 +137,30 @@ Desinstalar: `hermes plugins disable keygate`, borra
 `~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
 DB/keyfile/pass/audit. Nada queda en Hermes.
 
+## Logins con redirect / OAuth (Google, Microsoft, GitHub…)
+
+Funciona hoy, sin código extra — con una condición: **todos los campos de
+credenciales viven en UN origen** (el del proveedor). Google: email y password
+se escriben en `https://accounts.google.com` (distintas páginas, mismo origen;
+el normalizado ignora el path). El redirect de vuelta a tu app no tiene campos
+→ nada que llenar.
+
+- Entrada KeePass con URL = el origen del proveedor
+  (ej. `https://accounts.google.com/`), alias opaco igual que siempre.
+- Flujo: un fill por paso (email → siguiente página → password), una aprobación
+  cada uno. Redirects dentro del origen no rompen nada.
+- Lo que se rehúsa **a propósito**: usuario en un origen y password en otro
+  (`domain_mismatch`). Eso es la guardia anti-phishing, no un bug — ningún
+  proveedor serio parte credenciales entre dominios; si lo ves, sospecha.
+
+Límites honestos con Google en particular:
+
+- **Detección de bots**: un Chromium fresco/desechable suele chocar con *"This
+  browser or app may not be secure"*. Si pasa, la vía es tu perfil real ya
+  logueado (attach por CDP), donde no hay nada que llenar.
+- **Passkeys/WebAuthn**: no se pueden inyectar por diseño. Si la cuenta los
+  exige, la automatización se detiene ahí y lo dice.
+
 ## Dar cuentas: por la pagina local (camino normal)
 
 El instalador (`keygate-install`) arranca `keygate-sync` y te manda a
