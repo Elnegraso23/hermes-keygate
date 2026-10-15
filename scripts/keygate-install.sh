@@ -49,16 +49,20 @@ run config set browser.backend off
 run config set browser.use_real_profile false
 
 # 5. Start keygate-sync (idempotent: kill any old instance on this port).
+# KEYGATE_BIND respeta tu elección: 127.0.0.1 (default, solo esta máquina) o la
+# IP de Tailscale (100.x.y.z) para manejar el vault desde otro equipo.
 if pgrep -f "keygate_sync.py" >/dev/null 2>&1; then
   pkill -f "keygate_sync.py" 2>/dev/null || true
   sleep 1
 fi
-KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" KEYGATE_BIND=127.0.0.1 \
-KEYGATE_PORT="$PORT" setsid python3 "$REPO/sync/keygate_sync.py" \
+BIND="${KEYGATE_BIND:-127.0.0.1}"
+KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
+KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
+setsid python3 "$REPO/sync/keygate_sync.py" \
   >/tmp/keygate-sync.log 2>&1 < /dev/null &
 sleep 2
-if curl -s -o /dev/null -m 5 "http://127.0.0.1:$PORT/"; then
-  say "keygate-sync vivo en http://127.0.0.1:$PORT (log: /tmp/keygate-sync.log)"
+if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/"; then
+  say "keygate-sync vivo en http://$BIND:$PORT (log: /tmp/keygate-sync.log)"
 else
   say "(!) keygate-sync NO respondió — mira /tmp/keygate-sync.log"
 fi
@@ -66,15 +70,16 @@ fi
 cat <<EOF
 
 == LISTO ==
-Plugin skills: $DEST/skills/*/SKILL.md
-Vault:        $DB (keyfile-only) · $KF (0600)
+Plugin skills: \$DEST/skills/*/SKILL.md
+Vault:        \$DB (keyfile-only) · \$KF (0600)
+Sync web:     http://$BIND:$PORT  (127.0.0.1 = solo esta máquina; pasá KEYGATE_BIND=<IP Tailscale> para manejarlo desde otro equipo)
 
 Lo que haces ahora:
-1) Abre http://127.0.0.1:$PORT — la primera vez te obliga a crear una
+1) Abre la URL del sync en tu navegador. La primera vez te obliga a crear una
    contraseña (mínimo 12). Queda solo en esa pestaña.
 2) Tarjeta "Primera vez": descarga el .kdbx y el .key (una sola vez),
    edita en KeePassXC con ese .key, sube el .kdbx editado.
-3) Si quieres el login de prueba: https://the-internet.herokuapp.com/login
+3) Si querés el login de prueba: https://the-internet.herokuapp.com/login
    (usuario tomsmith · password SuperSecretPassword! — públicos).
 
 El plugin rige ya en esta sesión si hermes cargó el plugin activo; si no,
