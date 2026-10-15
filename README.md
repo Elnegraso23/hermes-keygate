@@ -61,7 +61,10 @@ browser local. Opcional: `croc` (solo sync remoto sin web).
 # 1. (Solo para humanos que quieran entender los pasos — los agentes: usen
 #    el comando de arriba.)
 git clone https://github.com/Elnegraso23/hermes-keygate.git ~/Projects/github/hermes-keygate
-cd ~/Projects/github/hermes-keygate && bash scripts/keygate-install.sh
+cd ~/Projects/github/hermes-keygate
+bash scripts/keygate-preflight.sh   # ¿esta máquina puede? (binarios, db-create, HOME, dir del vault)
+bash scripts/keygate-install.sh     # hace todo; el instalador también corre el preflight
+```
 
 # Lo que hace el script, paso por paso (a mano solo si insistes):
 #   a. clona/pull del repo

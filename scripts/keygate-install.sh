@@ -17,7 +17,6 @@ PORT="${KEYGATE_PORT:-8472}"
 say() { printf '  %s\n' "$*"; }
 run() { timeout 25 hermes "$@" >/dev/null 2>&1 && say "ok: hermes $*" || say "(!) hermes $* — check output / cfg"; }
 
-echo "== keygate-install =="
 # 1. Repo: clone if missing, pull if present (ff-only).
 if [ ! -d "$REPO/.git" ]; then
   mkdir -p "$(dirname "$REPO")"
@@ -27,6 +26,12 @@ else
 fi
 
 # 2. Plugin files + skills (BOTH — skills are instructions the agent reads).
+# 1.5 Preflight: con el repo ya presente, verificar que ESTA máquina puede
+# (keepassxc con db-create, HOME escribible, dir del vault). Fallar aqui es
+# barato y claro; a mitad del install, caro.
+bash "$REPO/scripts/keygate-preflight.sh" || {
+  echo "preflight falló — corregilo antes de instalar (no se toco nada)" >&2; exit 2; }
+
 mkdir -p "$DEST"
 cp "$REPO/__init__.py" "$REPO/keygate_lib.py" "$REPO/plugin.yaml" "$DEST/"
 rm -rf "$DEST/skills"
