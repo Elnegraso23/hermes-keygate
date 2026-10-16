@@ -1,6 +1,6 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 
-> **⚠️ ALFA (v0.4.0) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.5.0) — software fresco, con fallas conocidas.**
 > Esto funciona en la máquina del autor pero cambia rápido y a veces se rompe
 > (mira el historial: skills que no cargaban, rutas con comillas, botones mudos
 > — todo real, todo corregido en público). **No lo uses todavía para cuentas
@@ -54,8 +54,9 @@ hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
 > El script es idempotente (puedes re-correrlo), no toca tu vault personal,
 > no pide ni genera contraseñas maestras y jamás recibe credenciales.
 
-**Requisitos:** `keepassxc` (aporta `keepassxc-cli`) + Hermes Agent con
-browser local. Opcional: `croc` (solo sync remoto sin web).
+**Requisitos:** `keepassxc` ≥ 2.7 (aporta `keepassxc-cli` con `db-create`; el
+preflight lo verifica) + Hermes Agent con browser local. Opcional: `croc`
+(solo sync remoto sin web).
 
 ```bash
 # 1. (Solo para humanos que quieran entender los pasos — los agentes: usen
@@ -185,6 +186,16 @@ silencio**) y crea una nueva. El `.key` se **reutiliza**: el que descargaste una
 vez sigue abriendo la nueva, así que no hay que repetir el onboarding. El sync
 lee el archivo por llamada: los cambios se ven sin reiniciar el servicio.
 
+```bash
+bash scripts/keygate-setup --reset-key   # perdiste tu copia del .key: permite
+                                         # bajarlo UNA vez más (acción local
+                                         # explícita; quien tenga la password
+                                         # web podrá bajarlo de nuevo)
+bash scripts/keygate-install.sh --reset  # RESET TOTAL: borra password web +
+                                         # flag one-shot + reemplaza el vault
+                                         # (con respaldo). Default: seguro.
+```
+
 Desinstalar: `hermes plugins disable keygate`, borra
 `~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
 DB/keyfile/pass/audit. Nada queda en Hermes.
@@ -301,7 +312,10 @@ endpoint muere con 403). Se guarda con PBKDF2-HMAC-SHA256 + salt en
   (puede leer el vault directo, la web le sobra). La contraseña protege el
   acceso web REMOTO sin dejar secreto en disco.
 
-`/api/setup-state` (publico: si falta crearla) · `/api/aliases` redactados ·
+`/api/setup-state` (publico: si falta crearla) · `POST /api/reset-password`
+`{current, new}` (cambiarla conociendo la actual, min 12, auditado) ·
+`/api/health` (publico mínimo para monitoreo: locked, entries, setup_required)
+· `/api/aliases` redactados ·
 `GET /api/download` (baja el `.kdbx` actual: edítalo en KeePassXC y súbelo de
 vuelta — round-trip sin terminal) · `POST /api/upload` (valida KDBX+keyfile,
 rehúsa vacíos anti-wipe, backup+reemplazo atómico) · `/api/onboarding/keyfile`

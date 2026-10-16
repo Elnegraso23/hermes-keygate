@@ -4,6 +4,21 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.5.0 — 2026-10-16
+- Auditoría externa integrada (3 fixes verificados + 8 propuestas triageadas):
+  `rotate_backups` borraba 1 de más (off-by-one real); staging del upload en el
+  dir del DB + fallback `shutil.move` (EXDEV cross-device real); login card HTML
+  en vez de `prompt()` (cancelar dejaba la app visible sin auth).
+- `POST /api/reset-password` (exige la actual, min 12, auditado) y
+  `GET /api/health` público mínimo. Rate limiter con lock. Audit acotado a 64KB.
+- Server escribe PID file: el instalador para sin `pkill` (el guard de Hermes lo
+  bloquea). `keygate-setup --reset-key`, `keygate-install.sh --reset` (reset total
+  explícito: pass + flag + vault con respaldo).
+- Selftest 22 casos incl. upload round-trip en vivo, reset-password, health,
+  login card y rotación exacta. Diferido con motivo: sesiones HttpOnly, ETag,
+  multi-vault, rekey, autosubmit, TOTP-skew, CI, uninstall, audit-rotation
+  (append-only por forense).
+
 ## 0.4.0 — 2026-10-15
 - `keygate_version` avisa de updates contra GitHub aunque no tengas clon
   (GET público a `plugin.yaml` de main, cache 24h, offline = `unknown`).

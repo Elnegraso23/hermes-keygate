@@ -3,16 +3,24 @@
 # - Operative DB holds ONLY copies of what the agent may use (sacrificial).
 # - Personal DB is never referenced here.
 #
-# Uso: keygate-setup [--force]
+# Uso: keygate-setup [--force | --reset-key]
 #   --force: si la DB existe (corrupta, vieja, lo que sea), la MUEVE a
 #            hermes.kdbx.corrupt-<timestamp> (SIN sufijo .bak a propósito: así la rotación
 #            automática de backups (*.bak) jamás lo barre; nunca se borra en silencio)
 #            y crea una nueva. El keyfile se REUTILIZA (tu .key descargado
 #            sigue abriendo la nueva). Si querés keyfile nuevo también:
 #            borrá ~/.keepass-agent.key a mano antes (responsabilidad tuya).
+#   --reset-key: permite descargar el .key por la web UNA vez más. Borra la
+#            bandera `.keygate-keyfile-served` (acción local explícita, requiere
+#            shell en el host — jamás por web). Úsalo si perdiste tu copia del
+#            .key. OJO: quien tenga la contraseña web podrá bajar el .key de
+#            nuevo; es tu decisión consciente.
 set -euo pipefail
-FORCE=0
-[ "${1:-}" = "--force" ] && FORCE=1
+FORCE=0; RESETKEY=0
+for a in "$@"; do
+  [ "$a" = "--force" ] && FORCE=1
+  [ "$a" = "--reset-key" ] && RESETKEY=1
+done
 DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
 KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
 APROF="$HOME/.config/keepassxc-agent.ini"
@@ -63,4 +71,13 @@ else
 fi
 echo "-- verify non-interactive read (must print entry list or empty, never prompt):"
 timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
+if [ "$RESETKEY" = 1 ]; then
+  FLAG="$(dirname "$DB")/.keygate-keyfile-served"
+  if [ -f "$FLAG" ]; then
+    rm -f "$FLAG"
+    echo "-- one-shot .key flag REMOVED: la web permite descargar el .key una vez más (tu decisión)"
+  else
+    echo "-- one-shot .key flag no existía: nada que resetear"
+  fi
+fi
 echo "== done =="
