@@ -5,7 +5,8 @@
 #
 # Uso: keygate-setup [--force]
 #   --force: si la DB existe (corrupta, vieja, lo que sea), la MUEVE a
-#            hermes.kdbx.corrupt-<timestamp>.bak (nunca se borra en silencio)
+#            hermes.kdbx.corrupt-<timestamp> (SIN sufijo .bak a propósito: así la rotación
+#            automática de backups (*.bak) jamás lo barre; nunca se borra en silencio)
 #            y crea una nueva. El keyfile se REUTILIZA (tu .key descargado
 #            sigue abriendo la nueva). Si querés keyfile nuevo también:
 #            borrá ~/.keepass-agent.key a mano antes (responsabilidad tuya).
@@ -27,9 +28,9 @@ fi
 if [ -f "$DB" ]; then
   if [ "$FORCE" = 1 ]; then
     STAMP=$(date +%s)
-    mv "$DB" "$DB.corrupt-$STAMP.bak"
-    chmod 600 "$DB.corrupt-$STAMP.bak"
-    echo "-- DB anterior movida a $(basename "$DB").corrupt-$STAMP.bak (no se borró nada)"
+    mv "$DB" "$DB.corrupt-$STAMP"
+    chmod 600 "$DB.corrupt-$STAMP"
+    echo "-- DB anterior movida a $(basename "$DB").corrupt-$STAMP (no se borró nada; la rotación *.bak no lo toca)"
   else
     echo "-- operative DB exists: $DB (usá --force para reemplazarla con respaldo)"
     exit 0

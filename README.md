@@ -180,7 +180,7 @@ Reglas que sostienen el patrón:
 bash scripts/keygate-setup --force
 ```
 
-Mueve la DB actual a `hermes.kdbx.corrupt-<timestamp>.bak` (**nunca borra en
+Mueve la DB actual a `hermes.kdbx.corrupt-<timestamp>` (**nunca borra en
 silencio**) y crea una nueva. El `.key` se **reutiliza**: el que descargaste una
 vez sigue abriendo la nueva, así que no hay que repetir el onboarding. El sync
 lee el archivo por llamada: los cambios se ven sin reiniciar el servicio.
