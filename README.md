@@ -174,6 +174,17 @@ Reglas que sostienen el patrón:
 - La contraseña del sync y el `.key` **nunca por Telegram/chat**: quedan en
   historial y servidores de la plataforma.
 
+## Regenerar el vault (corrupto, viejo, o empezar de cero)
+
+```bash
+bash scripts/keygate-setup --force
+```
+
+Mueve la DB actual a `hermes.kdbx.corrupt-<timestamp>.bak` (**nunca borra en
+silencio**) y crea una nueva. El `.key` se **reutiliza**: el que descargaste una
+vez sigue abriendo la nueva, así que no hay que repetir el onboarding. El sync
+lee el archivo por llamada: los cambios se ven sin reiniciar el servicio.
+
 Desinstalar: `hermes plugins disable keygate`, borra
 `~/.hermes/plugins/keygate/`, el bloque de config, y (si quieres)
 DB/keyfile/pass/audit. Nada queda en Hermes.

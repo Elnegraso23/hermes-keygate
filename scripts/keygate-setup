@@ -2,7 +2,16 @@
 # keygate-setup: create operative vault (keyfile-only, NO master) + agent KeePassXC profile.
 # - Operative DB holds ONLY copies of what the agent may use (sacrificial).
 # - Personal DB is never referenced here.
+#
+# Uso: keygate-setup [--force]
+#   --force: si la DB existe (corrupta, vieja, lo que sea), la MUEVE a
+#            hermes.kdbx.corrupt-<timestamp>.bak (nunca se borra en silencio)
+#            y crea una nueva. El keyfile se REUTILIZA (tu .key descargado
+#            sigue abriendo la nueva). Si querés keyfile nuevo también:
+#            borrá ~/.keepass-agent.key a mano antes (responsabilidad tuya).
 set -euo pipefail
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
 DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
 KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
 APROF="$HOME/.config/keepassxc-agent.ini"
@@ -13,19 +22,26 @@ if [ ! -f "$KF" ]; then
   head -c 64 /dev/urandom | base64 > "$KF"
   chmod 600 "$KF"
 else
-  echo "-- keyfile exists: $KF"
+  echo "-- keyfile exists: $KF (se reutiliza: tu .key descargado sigue valiendo)"
 fi
-if [ ! -f "$DB" ]; then
-  # El directorio del vault puede no existir (server con home fresco, sin
-  # ~/Documentos): db-create falla con "No such file or directory" si no.
-  mkdir -p "$(dirname "$DB")"
-  echo "-- creating operative DB (keyfile-only, no master password)"
-  keepassxc-cli db-create --set-key-file "$KF" "$DB"
-  chmod 600 "$DB"
-  echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
-else
-  echo "-- operative DB exists: $DB"
+if [ -f "$DB" ]; then
+  if [ "$FORCE" = 1 ]; then
+    STAMP=$(date +%s)
+    mv "$DB" "$DB.corrupt-$STAMP.bak"
+    chmod 600 "$DB.corrupt-$STAMP.bak"
+    echo "-- DB anterior movida a $(basename "$DB").corrupt-$STAMP.bak (no se borró nada)"
+  else
+    echo "-- operative DB exists: $DB (usá --force para reemplazarla con respaldo)"
+    exit 0
+  fi
 fi
+# El directorio del vault puede no existir (server con home fresco, sin
+# ~/Documentos): db-create falla con "No such file or directory" si no.
+mkdir -p "$(dirname "$DB")"
+echo "-- creating operative DB (keyfile-only, no master password)"
+keepassxc-cli db-create --set-key-file "$KF" "$DB"
+chmod 600 "$DB"
+echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
 mkdir -p "$(dirname "$APROF")"
 if [ ! -f "$APROF" ]; then
   cat > "$APROF" <<EOF
