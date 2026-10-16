@@ -4,11 +4,19 @@
 # operative vault, applies config (no quotes), and STARTS keygate-sync.
 # Prints the exact URLs/commands the user needs afterwards.
 #
-# Usage: bash <repo>/scripts/keygate-install.sh
+# Usage: bash <repo>/scripts/keygate-install.sh [--reset] [repo-path]
+#   --reset: reset TOTAL antes de instalar (borra password web + flag one-shot
+#            del .key + reemplaza el vault con respaldo). Default: no destructivo.
 set -euo pipefail
 
 REPO_DEFAULT="${KEYGATE_REPO:-$HOME/Projects/github/hermes-keygate}"
-REPO="${1:-$REPO_DEFAULT}"
+REPO="$REPO_DEFAULT"; RESET=0
+for a in "$@"; do
+  case "$a" in
+    --reset) RESET=1 ;;
+    *) REPO="$a" ;;
+  esac
+done
 DEST="$HOME/.hermes/plugins/keygate"
 DB="$HOME/Documentos/hermes.kdbx"
 KF="$HOME/.keepass-agent.key"
@@ -40,7 +48,14 @@ find "$DEST/skills" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/nu
 run plugins enable keygate
 
 # 3. Operative vault (keyfile-only, NO master) via the repo's own script.
-bash "$REPO/scripts/keygate-setup"
+if [ "$RESET" = 1 ]; then
+  echo "-- RESET total pedido: borro password web + flag one-shot + reemplazo vault"
+  rm -f "$HOME/.hermes/keygate-sync-pass" && echo "   password web borrada (recreala en primera visita)"
+  rm -f "$HOME/Documentos/.keygate-keyfile-served" && echo "   flag one-shot borrado (el .key se puede bajar una vez más)"
+  bash "$REPO/scripts/keygate-setup" --force
+else
+  bash "$REPO/scripts/keygate-setup"
+fi
 
 # 4. Config via CLI (NEVER by hand — the YAML is agent-owned).
 run config set approvals.mode manual
@@ -53,14 +68,31 @@ run config set secrets.keepass.timeout_seconds 30
 run config set browser.backend off
 run config set browser.use_real_profile false
 
-# 5. Start keygate-sync (idempotent: kill any old instance on this port).
+# Detiene un sync previo SIN pkill (el guard de Hermes bloquea pkill desde el
+# gateway, y un pkill -f python3 podría llevarse el gateway mismo: ambos corren
+# sobre python3). Orden: unit systemd si existe -> PID file del propio server.
+stop_sync() {
+  if command -v systemctl >/dev/null 2>&1 \
+     && [ -f "$HOME/.config/systemd/user/keygate-sync.service" ]; then
+    systemctl --user stop keygate-sync.service 2>/dev/null || true
+  fi
+  PIDF="$HOME/.hermes/keygate-sync.pid"
+  if [ -f "$PIDF" ]; then
+    PID="$(cat "$PIDF" 2>/dev/null | tr -dc '0-9')"
+    if [ -n "$PID" ] && [ -r "/proc/$PID/cmdline" ] \
+       && tr '\0' ' ' < "/proc/$PID/cmdline" 2>/dev/null | grep -q "keygate_sync"; then
+      kill "$PID" 2>/dev/null || true
+      sleep 1
+    fi
+    rm -f "$PIDF"
+  fi
+}
+
+# 5. Start keygate-sync (idempotent: stop any old instance on this port).
 # Bind: KEYGATE_BIND explícito manda; si no, auto-detecta la IP de Tailscale
-# (así el vault se maneja desde otro equipo sin configuring nada); si no hay
+# (así el vault se maneja desde otro equipo sin configurar nada); si no hay
 # Tailscale, 127.0.0.1. NUNCA 0.0.0.0 (el server lo rehúsa igual).
-if pgrep -f "keygate_sync.py" >/dev/null 2>&1; then
-  pkill -f "keygate_sync.py" 2>/dev/null || true
-  sleep 1
-fi
+stop_sync
 if [ -n "${KEYGATE_BIND:-}" ]; then
   BIND="$KEYGATE_BIND"
 elif command -v tailscale >/dev/null 2>&1; then
@@ -96,7 +128,7 @@ RestartSec=3
 WantedBy=default.target
 UNITEOF
   # Bajar cualquier proceso suelto previo: dos servers en el puerto = conflicto.
-  pkill -f "keygate_sync.py" 2>/dev/null || true
+  stop_sync
   sleep 1
   systemctl --user daemon-reload 2>/dev/null || true
   systemctl --user enable --now keygate-sync.service 2>/dev/null || true

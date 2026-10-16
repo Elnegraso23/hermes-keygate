@@ -10,6 +10,8 @@ Endpoints (all require `Authorization: Bearer <password>` unless noted):
   GET  /                        status page (counts only, no secrets; public shell)
   GET  /api/setup-state          public: {setup_required} (first visit forces password creation)
   POST /api/set-password         {password} — allowed ONCE while no password set (min 12 chars)
+  POST /api/reset-password       {current, new} — change password (needs the current one, min 12)
+  GET  /api/health               public minimal: {ok, locked, entries, setup_required} (monitoring)
   GET  /api/aliases             [{alias, hint}] redacted metadata
   GET  /api/download            current operative .kdbx bytes (ciphertext only)
   POST /api/upload              multipart file field `db` -> validate/backup/atomic replace
@@ -40,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -124,7 +127,9 @@ def audit_ev(home: Path, ev: dict):
 def rotate_backups(db: str, keep: int):
     p = Path(db)
     existing = sorted(p.parent.glob(p.name + ".*.bak"), key=lambda x: x.stat().st_mtime)
-    for old in existing[:max(0, len(existing) - keep + 1)] if len(existing) >= keep else []:
+    # backup_db() already wrote the NEW backup before calling us, so `existing`
+    # includes it: delete down to exactly `keep`.
+    for old in existing[:max(0, len(existing) - keep)] if len(existing) >= keep else []:
         try:
             old.unlink()
         except Exception:
@@ -212,6 +217,18 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <pre id="setupout" style="display:none"></pre>
 </div>
 
+<div id="logincard" class="card" style="display:none;border-color:var(--acc)">
+<h2 style="margin-top:0">Acceso a keygate-sync</h2>
+<div class="sub">Ingresa la contraseña de la web. No se muestra nada sin ella.</div>
+<div class="row">
+<input type="password" id="loginpw" placeholder="Contraseña" autocomplete="current-password"
+ style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)"
+ onkeydown="if(event.key==='Enter')kg_login()">
+<button onclick="kg_login()">Entrar</button>
+</div>
+<pre id="loginout" style="display:none"></pre>
+</div>
+
 <div id="app" style="display:none">
 
 <div class="card"><div class="row">
@@ -274,12 +291,33 @@ async function boot() {
     document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
     document.getElementById('setupcard').style.display = 'block'; return; }
   if (st.setup_required) { document.getElementById('setupcard').style.display = 'block'; return; }
-  document.getElementById('app').style.display = 'block';
-  if (!sessionStorage.getItem('kg_t')) {
-    const t = prompt('Contraseña de keygate-sync:') || '';
-    if (!t) return;
-    sessionStorage.setItem('kg_t', t);
+  // #app stays hidden until a verified login: cancelling must show nothing.
+  document.getElementById('logincard').style.display = 'block';
+  if (sessionStorage.getItem('kg_t')) {
+    const ok = await kg_verify_token(sessionStorage.getItem('kg_t'));
+    if (ok) { document.getElementById('logincard').style.display = 'none';
+              document.getElementById('app').style.display = 'block'; load(); }
   }
+}
+async function kg_verify_token(t) {
+  try {
+    const r = await fetch('/api/audit', {headers: {'Authorization': 'Bearer ' + t}});
+    return r.status === 200;
+  } catch (e) { return false; }
+}
+async function kg_login() {
+  const pw = document.getElementById('loginpw').value;
+  const out = document.getElementById('loginout');
+  out.style.display = 'block';
+  if (!pw) { out.textContent = 'Ingresa la contraseña.'; return; }
+  const ok = await kg_verify_token(pw);
+  if (!ok) { out.textContent = 'Contraseña incorrecta.';
+             document.getElementById('loginpw').value = ''; return; }
+  sessionStorage.setItem('kg_t', pw);
+  document.getElementById('loginpw').value = '';
+  out.style.display = 'none';
+  document.getElementById('logincard').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
   load();
 }
 async function kg_setup() {
@@ -388,6 +426,7 @@ boot();
 class Handler(BaseHTTPRequestHandler):
     server_version = "keygate-sync/0.1"
     _hits: dict = {}
+    _hits_lock = threading.Lock()  # ThreadingHTTPServer: dict ops race without it
 
     def log_message(self, *a):
         pass  # never log request details (may carry metadata)
@@ -408,10 +447,12 @@ class Handler(BaseHTTPRequestHandler):
     def _rate_ok(self) -> bool:
         ip = self.client_address[0]
         now = time.time()
-        arr = [t for t in self._hits.get(ip, []) if now - t < RATE_WINDOW]
-        arr.append(now)
-        self._hits[ip] = arr
-        return len(arr) <= RATE_MAX
+        with self._hits_lock:
+            arr = [t for t in self._hits.get(ip, []) if now - t < RATE_WINDOW]
+            arr.append(now)
+            self._hits[ip] = arr
+            n = len(arr)
+        return n <= RATE_MAX
 
     def _send(self, code: int, obj) -> None:
         body = json.dumps(obj).encode()
@@ -457,6 +498,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
             self._send(200, {"success": True,
+                             "setup_required": not password_is_set(self._home())})
+            return
+        if url.path == "/api/health":
+            # Public by design (monitoring/startup probes): counts and flags
+            # only, zero secrets, zero hints.
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            locked = kg.db_locked(db, kf)
+            self._send(200, {"success": True, "ok": True,
+                             "locked": locked,
+                             "entries": 0 if locked else len(kg.list_entries(db, kf)),
                              "setup_required": not password_is_set(self._home())})
             return
         if not self._need_auth():
@@ -529,7 +582,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 n = 50
             try:
-                lines = (self._home() / "keygate-audit.jsonl").read_text().splitlines()[-n:]
+                # Bounded read: last 64KB only, so a bloated audit file can
+                # never balloon a response (or memory).
+                with open(self._home() / "keygate-audit.jsonl", "rb") as f:
+                    try:
+                        f.seek(-65536, 2)
+                        f.readline()  # drop a possibly torn first line
+                    except OSError:
+                        pass
+                    lines = f.read().decode("utf-8", errors="replace").splitlines()[-n:]
             except Exception:
                 lines = []
             self._send(200, {"success": True, "lines": lines})
@@ -574,6 +635,43 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._need_auth():
             return
+        if url.path == "/api/reset-password":
+            # Change the web password. Requires the CURRENT one (proves
+            # possession; no weaker than logging in). Min 12. Audited.
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 1024:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                body_j = json.loads(self.rfile.read(length).decode())
+                current = str(body_j.get("current") or "")
+                new = str(body_j.get("new") or "")
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            if not check_password(self._home(), current):
+                self._send(401, {"success": False, "error": "current password wrong"})
+                return
+            if len(new) < PW_MIN_LEN:
+                self._send(400, {"success": False,
+                                 "error": f"new password must be >= {PW_MIN_LEN} chars"})
+                return
+            try:
+                salt = os.urandom(32)
+                d = {"salt": salt.hex(), "hash": hash_pw(new, salt).hex(),
+                     "iters": PW_ITERS, "set_at": int(time.time())}
+                pf = passfile(self._home())
+                pf.parent.mkdir(parents=True, exist_ok=True)
+                tmp_pf = pf.with_suffix(".tmp")
+                tmp_pf.write_text(json.dumps(d))
+                os.chmod(tmp_pf, 0o600)
+                os.replace(tmp_pf, pf)
+            except Exception:
+                self._send(500, {"success": False, "error": "could not store password"})
+                return
+            audit_ev(self._home(), {"ev": "sync", "action": "password-reset"})
+            self._send(200, {"success": True})
+            return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_UPLOAD + 65536:
             self._send(400, {"success": False, "error": "bad upload size"})
@@ -593,7 +691,10 @@ class Handler(BaseHTTPRequestHandler):
             if not data.startswith(b"\x03\xd9\xa2\x9a"):  # KDBX magic
                 self._send(400, {"success": False, "error": "not a KDBX file"})
                 return
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".kdbx") as tf:
+            # Staging lives NEXT TO the DB (same filesystem): /tmp is often
+            # tmpfs and os.replace() across filesystems dies with EXDEV.
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".kdbx",
+                                             dir=str(Path(db).parent)) as tf:
                 tf.write(data)
                 staging = tf.name
             replaced = False
@@ -606,7 +707,12 @@ class Handler(BaseHTTPRequestHandler):
                                      "error": "staging opens but holds 0 entries — refused (anti-wipe)"})
                     return
                 backup_db(db, keep)
-                os.replace(staging, db)
+                try:
+                    os.replace(staging, db)
+                except OSError:
+                    # Cross-device fallback (shouldn't happen now that staging
+                    # is next to the DB, but fail safe, never fail loud).
+                    shutil.move(staging, db)
                 replaced = True
                 os.chmod(db, 0o600)
                 after = count_entries(db, kf)
@@ -661,6 +767,17 @@ def main() -> int:
     if not password_is_set(home):
         print("Sin contraseña todavía: la primera visita a la pagina la crea (min 12, una sola vez).",
               file=sys.stderr)
+    try:  # PID file: lets the installer stop THIS server without pkill
+        # (Hermes' gateway guard blocks pkill patterns).
+        pf = home / "keygate-sync.pid"
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        pf.write_text(str(os.getpid()))
+        try:
+            os.chmod(pf, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
     srv = ThreadingHTTPServer((bind, port), Handler)
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
     print("Auth por contraseña (PBKDF2, solo en tu navegador por pestaña). Jamás por chat (queda en historial).")

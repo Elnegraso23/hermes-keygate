@@ -93,5 +93,79 @@ out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$REPO" 2>&1) || true
 echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
   || bad "updater con repo" "$(echo "$out" | tail -n 2)"
 
+# --- 8. servidor vivo: health público + login card sin prompt() + PID file ---
+SHOME="$TMP/srvhome"; mkdir -p "$SHOME"
+SDB="$TMP/srvdb.kdbx"; SKF="$TMP/srv.key"
+head -c 128 /dev/urandom > "$SKF" && chmod 600 "$SKF"
+keepassxc-cli db-create --set-key-file "$SKF" -q "$SDB" >/dev/null 2>&1
+printf 'x\n' | keepassxc-cli add -k "$SKF" --no-password -q "$SDB" t-alias -u u --url https://example.com/login -p >/dev/null 2>&1
+SPORT=8479
+HOME="$SHOME" KEYGATE_DB="$SDB" KEYGATE_KEYFILE="$SKF" KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=$SPORT \
+  setsid python3 "$REPO/sync/keygate_sync.py" >/tmp/kg-selftest-srv.log 2>&1 < /dev/null &
+SRV=$!
+sleep 2
+B="http://127.0.0.1:$SPORT"
+[ -f "$SHOME/.hermes/keygate-sync.pid" ] && ok "server escribe PID file" \
+  || bad "PID file del server" "no apareció $SHOME/.hermes/keygate-sync.pid"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$B/api/health")
+body=$(curl -s -m 10 "$B/api/health")
+if [ "$code" = "200" ] && echo "$body" | grep -q '"entries": 1'; then
+  ok "health público (locked/entries sin auth)"
+else
+  bad "health público" "code=$code body=$body"
+fi
+page=$(curl -s -m 10 "$B/")
+if echo "$page" | grep -q "logincard" && ! echo "$page" | grep -q "prompt('Contraseña"; then
+  ok "login card presente, prompt() nativo eliminado"
+else
+  bad "login card" "falta logincard o sigue prompt() nativo"
+fi
+
+# --- 9. reset-password: exige la actual, min 12, invalida la vieja ---
+# (el endpoint exige Bearer ADEMÁS del campo current: los curls llevan auth)
+PW1="clave-inicial-larga-1"; PW2="clave-nueva-larga-22"
+r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
+echo "$r" | grep -q '"success": true' && ok "set-password inicial" || bad "set-password" "$r"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
+  -H 'Content-Type: application/json' -d "{\"current\":\"mal\",\"new\":\"$PW2\"}")
+[ "$code" = "401" ] && ok "reset sin Bearer -> 401" || bad "reset sin auth" "code=$code"
+A1="Authorization: Bearer $PW1"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
+  -H "$A1" -H 'Content-Type: application/json' -d "{\"current\":\"mal\",\"new\":\"$PW2\"}")
+[ "$code" = "401" ] && ok "reset con actual mala -> 401" || bad "reset mala" "code=$code"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
+  -H "$A1" -H 'Content-Type: application/json' -d "{\"current\":\"$PW1\",\"new\":\"corta\"}")
+[ "$code" = "400" ] && ok "reset con nueva corta -> 400" || bad "reset corta" "code=$code"
+r=$(curl -s -m 10 -X POST "$B/api/reset-password" -H "$A1" -H 'Content-Type: application/json' \
+  -d "{\"current\":\"$PW1\",\"new\":\"$PW2\"}")
+echo "$r" | grep -q '"success": true' && ok "reset con actual buena -> 200" || bad "reset buena" "$r"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $PW1" "$B/api/aliases")
+[ "$code" = "401" ] && ok "password vieja ya no autentica" || bad "vieja aun vale" "code=$code"
+code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $PW2" "$B/api/aliases")
+[ "$code" = "200" ] && ok "password nueva autentica" || bad "nueva no vale" "code=$code"
+
+# --- 10. upload round-trip: acepta válido, rehúsa vacío, rotación exacta ---
+H="Authorization: Bearer $PW2"
+DDB="$TMP/up.kdbx"
+cp "$SDB" "$DDB"
+# 5 backups viejos JUNTO AL DB DEL SERVER + upload = deben quedar exactamente 5 (fórmula sin +1)
+for i in 1 2 3 4 5; do cp "$SDB" "$SDB.100$i.bak"; touch -d "@100$i" "$SDB.100$i.bak"; done
+printf 'y\n' | keepassxc-cli add -k "$SKF" --no-password -q "$DDB" t-alias-2 -u u2 --url https://example.com/login -p >/dev/null 2>&1
+r=$(curl -s -m 30 -X POST -H "$H" -F "db=@$DDB;filename=hermes.kdbx" "$B/api/upload")
+if echo "$r" | grep -q '"success": true'; then
+  ok "upload válido aceptado: $r"
+else
+  bad "upload válido" "$r"
+fi
+n=$(ls "$SDB".*.bak 2>/dev/null | wc -l)
+[ "$n" = "5" ] && ok "rotación exacta: 5 backups (no 4)" || bad "rotación" "quedaron $n, esperaba 5"
+EDB="$TMP/empty.kdbx"
+keepassxc-cli db-create --set-key-file "$SKF" -q "$EDB" >/dev/null 2>&1
+r=$(curl -s -m 30 -X POST -H "$H" -F "db=@$EDB;filename=hermes.kdbx" "$B/api/upload")
+echo "$r" | grep -q "anti-wipe" && ok "upload vacío rehusado (anti-wipe)" || bad "anti-wipe" "$r"
+left=$(ls "$(dirname "$SDB")"/hermes.kdbx.* 2>/dev/null | grep -v -E "\.bak$|srvdb" | wc -l)
+[ "$left" = "0" ] && ok "staging limpiado tras rechazo" || bad "staging huerfano" "$left archivos"
+kill $SRV 2>/dev/null || true
+
 echo "== selftest: $pass PASS, $fail FAIL =="
 [ "$fail" = 0 ] || exit 1
