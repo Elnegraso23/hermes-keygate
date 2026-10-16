@@ -93,6 +93,25 @@ out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$REPO" 2>&1) || true
 echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
   || bad "updater con repo" "$(echo "$out" | tail -n 2)"
 
+# --- 7b. updater JAMÁS toca vault/keyfile/pass/flag (garantía de actualización) ---
+UH="$TMP/uhome"; mkdir -p "$UH/Documentos" "$UH/.hermes"
+head -c 64 /dev/urandom | base64 > "$UH/.keepass-agent.key" && chmod 600 "$UH/.keepass-agent.key"
+keepassxc-cli db-create --set-key-file "$UH/.keepass-agent.key" -q "$UH/Documentos/hermes.kdbx" >/dev/null 2>&1
+printf 'x\n' | keepassxc-cli add -k "$UH/.keepass-agent.key" --no-password -q "$UH/Documentos/hermes.kdbx" u-entry -u u --url https://example.com/ -p >/dev/null 2>&1
+echo "pass-falsa" > "$UH/.hermes/keygate-sync-pass"
+echo "123" > "$UH/Documentos/.keygate-keyfile-served"
+before=$(sha256sum "$UH/Documentos/hermes.kdbx" "$UH/.keepass-agent.key" "$UH/.hermes/keygate-sync-pass" "$UH/Documentos/.keygate-keyfile-served" | sha256sum | cut -d' ' -f1)
+HOME="$UH" bash "$REPO/scripts/keygate-update" "$REPO" >/dev/null 2>&1 || true
+after=$(sha256sum "$UH/Documentos/hermes.kdbx" "$UH/.keepass-agent.key" "$UH/.hermes/keygate-sync-pass" "$UH/Documentos/.keygate-keyfile-served" | sha256sum | cut -d' ' -f1)
+if [ "$before" = "$after" ]; then
+  ok "updater no toca vault/keyfile/pass/flag (hashes idénticos)"
+else
+  bad "updater tocó el vault" "hash antes=$before después=$after"
+fi
+# y el updater aborta si el rango trajera .kdbx/.key (aunque .gitignore lo impide)
+echo "$out" | grep -q "instalado en" && ok "marcador .installed_commit escrito" \
+  || bad "marcador" "$out"
+
 # --- 8. servidor vivo: health público + login card sin prompt() + PID file ---
 SHOME="$TMP/srvhome"; mkdir -p "$SHOME"
 SDB="$TMP/srvdb.kdbx"; SKF="$TMP/srv.key"
