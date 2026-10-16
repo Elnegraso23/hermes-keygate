@@ -69,15 +69,57 @@ elif command -v tailscale >/dev/null 2>&1; then
 else
   BIND="127.0.0.1"
 fi
-KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
-KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
-setsid python3 "$REPO/sync/keygate_sync.py" \
-  >/tmp/keygate-sync.log 2>&1 < /dev/null &
-sleep 2
-if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/"; then
-  say "keygate-sync vivo en http://$BIND:$PORT (log: /tmp/keygate-sync.log)"
+# systemd user si existe (duro: sobrevive al cierre del chat); si no, proceso
+# en background como antes. El proceso suelto se moría al terminar el turno:
+# el curl del install pasaba y minutos después no había nadie escuchando.
+PY_BIN="$(command -v python3)"
+UNIT_DIR="$HOME/.config/systemd/user"
+UNIT="$UNIT_DIR/keygate-sync.service"
+if command -v systemctl >/dev/null 2>&1 && [ -n "$PY_BIN" ]; then
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT" <<UNITEOF
+[Unit]
+Description=keygate-sync (vault web de hermes-keygate)
+After=default.target
+
+[Service]
+Type=simple
+Environment=KEYGATE_DB=$DB
+Environment=KEYGATE_KEYFILE=$KF
+Environment=KEYGATE_BIND=$BIND
+Environment=KEYGATE_PORT=$PORT
+ExecStart=$PY_BIN $REPO/sync/keygate_sync.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+UNITEOF
+  # Bajar cualquier proceso suelto previo: dos servers en el puerto = conflicto.
+  pkill -f "keygate_sync.py" 2>/dev/null || true
+  sleep 1
+  systemctl --user daemon-reload 2>/dev/null || true
+  systemctl --user enable --now keygate-sync.service 2>/dev/null || true
+  loginctl enable-linger 2>/dev/null || true
+fi
+if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/" 2>/dev/null; then
+  if [ -f "$UNIT" ]; then
+    say "keygate-sync vivo (systemd) en http://$BIND:$PORT — sobrevive al cierre del chat"
+  else
+    say "keygate-sync vivo (proceso suelto) en http://$BIND:$PORT — morirá con esta sesión"
+  fi
 else
-  say "(!) keygate-sync NO respondió — mira /tmp/keygate-sync.log"
+  # Sin systemd (o falló): proceso en background como antes.
+  KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
+  KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
+  setsid python3 "$REPO/sync/keygate_sync.py" \
+    >/tmp/keygate-sync.log 2>&1 < /dev/null &
+  sleep 2
+  if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/"; then
+    say "keygate-sync vivo (proceso suelto) en http://$BIND:$PORT (log: /tmp/keygate-sync.log)"
+  else
+    say "(!) keygate-sync NO respondió — mira /tmp/keygate-sync.log y journalctl --user -u keygate-sync"
+  fi
 fi
 
 cat <<EOF
@@ -96,10 +138,10 @@ Lo que haces ahora:
    (usuario tomsmith · password SuperSecretPassword! — públicos).
 
 Para cambiar el bind después (sin reinstalar todo):
-pkill -f keygate_sync.py
-KEYGATE_DB="\$DB" KEYGATE_KEYFILE="\$KF" KEYGATE_BIND=127.0.0.1 \\
-  KEYGATE_PORT=8472 setsid python3 "\$REPO/sync/keygate_sync.py" \\
-  >/tmp/keygate-sync.log 2>&1 < /dev/null &
+editá $HOME/.config/systemd/user/keygate-sync.service (KEYGATE_BIND),
+después: systemctl --user daemon-reload && systemctl --user restart keygate-sync
+
+Útil: systemctl --user status keygate-sync · journalctl --user -u keygate-sync -n 50
 
 El plugin rige ya en esta sesión si hermes cargó el plugin activo; si no,
 reinicia el chat y verifica con keygate_status.
