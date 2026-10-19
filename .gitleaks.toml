@@ -1,0 +1,17 @@
+# Allowlist de gitleaks para hermes-keygate.
+#
+# Motivo: el README (commit 466db63, 2026-09-22) documenta como lanzar el
+# sync con un token de EJEMPLO en la linea de comando. gitleaks lo marca como
+# "generic-api-key" por entropia, pero:
+#   - el propio README dice que el token real debe tener >= 16 caracteres
+#     ("Sin token (>=16) no arranca"), y el valor del ejemplo tiene 13
+#   - no es un secret: es un placeholder de documentacion
+#   - NO coincide con ningun token real del host (verificado por comparacion)
+#
+# Se acepta SOLO esa ruta y ese valor de ejemplo; cualquier otro valor en el
+# README (o en cualquier otro archivo) sigue siendo bloqueado por gitleaks.
+
+[allowlist]
+  description = "Token de ejemplo en el README (no es un secret real)"
+  paths = ['''README\.md''']
+  regexes = ['''KEYGATE_SYNC_TOKEN='[a-zA-Z0-9_-]{8,20}''']
