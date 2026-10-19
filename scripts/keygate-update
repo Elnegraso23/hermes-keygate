@@ -34,9 +34,12 @@ if [ "$pull_ok" != 1 ]; then
   # eso todo lo de abajo lleva `|| true`.
   BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
   if [ -z "$BR" ] || [ "$BR" = "HEAD" ]; then
-    # HEAD detached (típico en actions/checkout de un PR): se usa la rama por
-    # defecto del remoto.
-    BR=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+    # HEAD detached (típico en actions/checkout de un PR): se busca la rama
+    # que el remoto realmente tiene, NO se asume "main" (en un PR la rama
+    # puede ser feature/... y "main" no existir en ese remoto -> "couldn't
+    # find remote ref main").
+    BR=$(git -C "$REPO" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null \
+           | grep -v -E 'HEAD$|^origin$' | head -n 1 | sed 's|^origin/||' || true)
     [ -z "$BR" ] && BR="main"
   fi
   pull_out2=$(git -C "$REPO" pull --ff-only origin "$BR" 2>&1) && pull_ok=1 || pull_ok=0
