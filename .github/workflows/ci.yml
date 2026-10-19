@@ -25,10 +25,15 @@ jobs:
         run: bash scripts/keygate-selftest.sh
 
       - name: Secret scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+        # Se usa el CLI de gitleaks, NO la action de gitleaks: la action
+        # intenta subir un SARIF/artifact via API y en repos PRIVADOS el
+        # GITHUB_TOKEN no tiene ese permiso -> "Resource not accessible by
+        # integration" y el job falla aunque no haya ninguna fuga.
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact --verbose --exit-code 1
+          echo "gitleaks: sin fugas"
 
   syntax:
     runs-on: ubuntu-latest
