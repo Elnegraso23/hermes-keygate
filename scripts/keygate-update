@@ -28,18 +28,20 @@ BEFORE=$(git -C "$REPO" rev-parse --short HEAD)
 # abortando el update.
 pull_out=$(git -C "$REPO" pull --ff-only 2>&1) && pull_ok=1 || pull_ok=0
 if [ "$pull_ok" != 1 ]; then
-  BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
-  case "$BR" in
-    HEAD|"")
-      # HEAD detached: no hay rama que actualizar; se usa la rama por defecto.
-      BR=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-      [ -z "$BR" ] && BR="main"
-      ;;
-  esac
+  # OJO: el script corre con `set -e`. Una asignación cuya sustitución de
+  # comandos falla (ej. `git symbolic-ref` en un clon sin origin/HEAD) ABORTA
+  # el script entero en silencio -> el update moría con un error vacío. Por
+  # eso todo lo de abajo lleva `|| true`.
+  BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+  if [ -z "$BR" ] || [ "$BR" = "HEAD" ]; then
+    # HEAD detached (típico en actions/checkout de un PR): se usa la rama por
+    # defecto del remoto.
+    BR=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)
+    [ -z "$BR" ] && BR="main"
+  fi
   pull_out2=$(git -C "$REPO" pull --ff-only origin "$BR" 2>&1) && pull_ok=1 || pull_ok=0
   if [ "$pull_ok" = 1 ]; then
     echo "$pull_out" | tail -n 2
-    pull_out="$pull_out2"
   else
     echo "$pull_out" | tail -n 2
     echo "pull falló (¿cambios locales? haz stash primero)" >&2

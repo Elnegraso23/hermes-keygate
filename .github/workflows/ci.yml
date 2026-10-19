@@ -10,6 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Historial completo: el selftest prueba keygate-update, que hace
+          # 'git pull --ff-only' y compara el rango de commits. Con
+          # fetch-depth: 1 (default) el pull no puede hacer ff-only.
+          fetch-depth: 0
 
       - name: Instalar KeePassXC (para keepassxc-cli)
         run: |
