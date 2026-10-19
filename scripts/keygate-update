@@ -43,8 +43,13 @@ if [ "$pull_ok" != 1 ]; then
   if [ "$pull_ok" = 1 ]; then
     echo "$pull_out" | tail -n 2
   else
+    # Se muestra el error REAL de git (no solo "pull falló"): sin esto el
+    # diagnóstico es una caja negra y parece un bug del updater cuando en
+    # realidad puede ser auth, red, o un remoto sin la rama.
     echo "$pull_out" | tail -n 2
     echo "pull falló (¿cambios locales? haz stash primero)" >&2
+    echo "--- detalle de git ---" >&2
+    echo "$pull_out2" | tail -n 8 >&2
     exit 2
   fi
 fi
