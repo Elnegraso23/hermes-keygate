@@ -25,6 +25,25 @@ DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
 KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
 APROF="$HOME/.config/keepassxc-agent.ini"
 
+# Reset del flag one-shot del .key. Se ejecuta SIEMPRE primero (antes de tocar
+# la DB): si la DB operativa ya existe, el flujo historico hacia `exit 0` y el
+# flag nunca se reseteaba -> `--reset-key` era un no-op silencioso y el .key
+# quedaba irrecuperable desde la web.
+reset_key_flag() {
+  local flag
+  flag="$(dirname "$DB")/.keygate-keyfile-served"
+  if [ -f "$flag" ]; then
+    rm -f "$flag"
+    echo "-- one-shot .key flag REMOVED: la web permite descargar el .key una vez más (tu decisión)"
+  else
+    echo "-- one-shot .key flag no existía: nada que resetear"
+  fi
+}
+
+if [ "$RESETKEY" = 1 ]; then
+  reset_key_flag
+fi
+
 echo "== keygate setup =="
 if [ ! -f "$KF" ]; then
   echo "-- creating keyfile $KF (0600)"
@@ -71,13 +90,4 @@ else
 fi
 echo "-- verify non-interactive read (must print entry list or empty, never prompt):"
 timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
-if [ "$RESETKEY" = 1 ]; then
-  FLAG="$(dirname "$DB")/.keygate-keyfile-served"
-  if [ -f "$FLAG" ]; then
-    rm -f "$FLAG"
-    echo "-- one-shot .key flag REMOVED: la web permite descargar el .key una vez más (tu decisión)"
-  else
-    echo "-- one-shot .key flag no existía: nada que resetear"
-  fi
-fi
 echo "== done =="
