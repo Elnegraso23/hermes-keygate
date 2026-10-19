@@ -18,8 +18,14 @@ for bin in git python3 keepassxc-cli curl; do
 done
 
 # db-create apareció en keepassxc-cli 2.7: sin él, keygate-setup no crea el vault.
+# NO se comprueba grepeando el help: en varias versiones (p.ej. las de Ubuntu
+# 24.04 / keepassxc 2.7.9) `keepassxc-cli` sin argumentos imprime solo una
+# lista recortada de comandos y db-create NO aparece, aunque el subcomando
+# exista y funcione. Se comprueba EJECUTANDO el subcomando (dry-run sin
+# argumentos): si responde con su usage en vez de "Unknown command", existe.
 if command -v keepassxc-cli >/dev/null 2>&1; then
-  if keepassxc-cli 2>&1 | grep -q "db-create"; then
+  kx_out=$(keepassxc-cli db-create --help 2>&1)
+  if echo "$kx_out" | grep -qE "db-create|Usage: keepassxc-cli db-create"; then
     say "ok: keepassxc-cli trae db-create"
   else
     say "FALTA: keepassxc-cli sin db-create (necesitas >= 2.7; $(keepassxc-cli --version 2>&1 | head -n1))"
@@ -27,7 +33,18 @@ if command -v keepassxc-cli >/dev/null 2>&1; then
   fi
 fi
 
-if [ -w "$HOME" ]; then say "ok: HOME escribible ($HOME)"; else say "FALTA: HOME no escribible ($HOME)"; fail=1; fi
+# HOME escribible. OJO: [ -w ] sobre un path que AUN NO EXISTE devuelve false
+# (bash no puede saber si un dir inexistente sería escribible), así que un
+# home recién creado por el instalador daba "HOME no escribible" y el
+# preflight FALLABA en hosts perfectamente válidos. Se comprueba tentando
+# escribir de verdad, y se crea el home si falta.
+if mkdir -p "$HOME" 2>/dev/null && [ -d "$HOME" ] && touch "$HOME/.kg-preflight-write-test" 2>/dev/null; then
+  rm -f "$HOME/.kg-preflight-write-test"
+  say "ok: HOME escribible ($HOME)"
+else
+  say "FALTA: HOME no escribible ($HOME)"
+  fail=1
+fi
 
 if mkdir -p "$(dirname "$DB")" 2>/dev/null; then
   say "ok: dir del vault $([ -d "$(dirname "$DB")" ] && echo existe || echo creado)"

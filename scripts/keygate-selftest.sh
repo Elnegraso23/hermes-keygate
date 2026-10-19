@@ -88,10 +88,36 @@ else
 fi
 
 # --- 7. updater con repo local real llega a comparar HEAD ---
+# El updater hace `git pull --ff-only` contra el ORIGEN del repo. Si ese origin
+# es un repo PRIVADO de GitHub, el pull pide usuario (no hay tty) y el selftest
+# falla con "could not read Username" -> falso negativo que NO es un bug del
+# updater. Por eso el selftest clona el repo a un clon LOCAL (file://, offline,
+# sin red ni credenciales) y prueba el updater contra ese clon.
 git -C "$REPO" rev-parse HEAD >/dev/null 2>&1 || { bad "repo git" "el repo del selftest no es git"; }
-out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$REPO" 2>&1) || true
-echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
-  || bad "updater con repo" "$(echo "$out" | tail -n 2)"
+# Repo de prueba AUTÓNOMO, con su propio origin local y una rama real.
+# No se clona $REPO: en CI el checkout de actions/checkout queda en HEAD
+# DETACHED y sin ramas locales, así que el clon heredaba esa condición
+# (sin rama, sin upstream) y el 'git pull --ff-only' del updater fallaba con
+# "couldn't find remote ref main" -> falso negativo que NO era un bug del
+# updater. Se arma a mano un repo con rama + origin local: determinista.
+CLONE="$TMP/cloned-repo"
+CLONE_ORIGIN="$TMP/cloned-origin.git"
+rm -rf "$CLONE" "$CLONE_ORIGIN"
+if mkdir -p "$CLONE" && git init -q -b main "$CLONE" 2>/dev/null; then
+  # Snapshot del código del repo (sin .git) como contenido del repo de prueba.
+  (cd "$REPO" && tar --exclude=.git -cf - .) | (cd "$CLONE" && tar -xf -) 2>/dev/null
+  git -C "$CLONE" add -A >/dev/null 2>&1
+  git -C "$CLONE" -c user.email=selftest@local -c user.name=selftest \
+      commit -qm "snapshot para el test del updater" >/dev/null 2>&1
+  git init -q --bare "$CLONE_ORIGIN" 2>/dev/null
+  git -C "$CLONE" remote add origin "$CLONE_ORIGIN" 2>/dev/null || true
+  git -C "$CLONE" push -q -u origin main >/dev/null 2>&1 || git -C "$CLONE" push -q origin main >/dev/null 2>&1
+  out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$CLONE" 2>&1) || true
+  echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
+    || bad "updater con repo" "$(echo "$out" | tail -n 2)"
+else
+  bad "updater con repo" "no se pudo crear el repo de prueba"
+fi
 
 # --- 7b. updater JAMÁS toca vault/keyfile/pass/flag (garantía de actualización) ---
 UH="$TMP/uhome"; mkdir -p "$UH/Documentos" "$UH/.hermes"
@@ -101,7 +127,7 @@ printf 'x\n' | keepassxc-cli add -k "$UH/.keepass-agent.key" --no-password -q "$
 echo "pass-falsa" > "$UH/.hermes/keygate-sync-pass"
 echo "123" > "$UH/Documentos/.keygate-keyfile-served"
 before=$(sha256sum "$UH/Documentos/hermes.kdbx" "$UH/.keepass-agent.key" "$UH/.hermes/keygate-sync-pass" "$UH/Documentos/.keygate-keyfile-served" | sha256sum | cut -d' ' -f1)
-HOME="$UH" bash "$REPO/scripts/keygate-update" "$REPO" >/dev/null 2>&1 || true
+HOME="$UH" bash "$REPO/scripts/keygate-update" "$CLONE" >/dev/null 2>&1 || true
 after=$(sha256sum "$UH/Documentos/hermes.kdbx" "$UH/.keepass-agent.key" "$UH/.hermes/keygate-sync-pass" "$UH/Documentos/.keygate-keyfile-served" | sha256sum | cut -d' ' -f1)
 if [ "$before" = "$after" ]; then
   ok "updater no toca vault/keyfile/pass/flag (hashes idénticos)"
@@ -185,6 +211,39 @@ echo "$r" | grep -q "anti-wipe" && ok "upload vacío rehusado (anti-wipe)" || ba
 left=$(ls "$(dirname "$SDB")"/hermes.kdbx.* 2>/dev/null | grep -v -E "\.bak$|srvdb" | wc -l)
 [ "$left" = "0" ] && ok "staging limpiado tras rechazo" || bad "staging huerfano" "$left archivos"
 kill $SRV 2>/dev/null || true
+
+# --- 11. keygate-setup --reset-key con la DB YA CREADA ---
+# (bug real: el reseteo del flag one-shot estaba AL FINAL del script, despues
+#  de la rama "operative DB exists" que hace `exit 0` -> con la DB ya creada el
+#  flag NUNCA se borraba y el .key quedaba irrecuperable desde la web: el
+#  endpoint /api/onboarding/keyfile respondia 410 Gone para siempre.)
+RDB="$TMP/reset/hermes.kdbx"
+RKF="$TMP/reset/.keepass-agent.key"
+mkdir -p "$TMP/reset"
+HOME="$TMP/reset" KEYGATE_DB="$RDB" KEYGATE_KEYFILE="$RKF" \
+  bash "$REPO/scripts/keygate-setup" >/dev/null 2>&1
+FLAG="$(dirname "$RDB")/.keygate-keyfile-served"
+printf '%s\n' "1234567890" > "$FLAG"
+out=$(HOME="$TMP/reset" KEYGATE_DB="$RDB" KEYGATE_KEYFILE="$RKF" \
+      bash "$REPO/scripts/keygate-setup" --reset-key 2>&1)
+if [ ! -f "$FLAG" ]; then
+  ok "--reset-key borra el flag one-shot aunque la DB ya exista"
+else
+  bad "--reset-key con DB existente" "el flag .keygate-keyfile-served sigue ahí (no-op silencioso)"
+fi
+# El reset NO debe regenerar el keyfile ni tocar la DB operativa.
+if [ -f "$RKF" ] && [ -f "$RDB" ]; then
+  ok "--reset-key no toca keyfile ni DB operativa"
+else
+  bad "--reset-key destruyó keyfile o DB" "keyfile o vault faltantes"
+fi
+# Y el vault debe seguir abrible con su keyfile (integridad).
+if HOME="$TMP/reset" KEYGATE_DB="$RDB" KEYGATE_KEYFILE="$RKF" \
+   timeout 10 keepassxc-cli ls -k "$RKF" --no-password -q "$RDB" < /dev/null >/dev/null 2>&1; then
+  ok "vault sigue abrible tras --reset-key"
+else
+  bad "vault abrible tras --reset-key" "keepassxc-cli no pudo abrir el vault"
+fi
 
 echo "== selftest: $pass PASS, $fail FAIL =="
 [ "$fail" = 0 ] || exit 1

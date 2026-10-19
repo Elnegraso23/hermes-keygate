@@ -6,3 +6,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Cuerpo del PR generado por Hermes (nunca se versiona)
+.hermes-pr-body.md
