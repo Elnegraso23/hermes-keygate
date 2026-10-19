@@ -96,10 +96,17 @@ fi
 git -C "$REPO" rev-parse HEAD >/dev/null 2>&1 || { bad "repo git" "el repo del selftest no es git"; }
 CLONE="$TMP/cloned-repo"
 if git clone -q --no-hardlinks "$REPO" "$CLONE" 2>/dev/null; then
-  # El clon debe ser autónomo: su origin NO puede seguir apuntando al repo
-  # original (que puede ser un remoto PRIVADO de GitHub -> "git pull" pediría
-  # usuario y el updater fallaría sin ser un bug suyo). Se apunta a sí mismo.
+  # El clon debe ser AUTÓNOMO. El origin heredado apunta al repo de origen,
+  # que en CI es el checkout shallow de actions/checkout (origin = GitHub).
+  # Si ese origin es PRIVADO, el "git pull --ff-only" del updater pide usuario
+  # (sin tty) y falla con "could not read Username" -> falso negativo que NO
+  # es un bug del updater. Ademas un clon shallow no puede hacer ff-only.
+  # Fix: origin = el propio clon, y se des-shallowiza si hizo falta.
   git -C "$CLONE" remote set-url origin "$CLONE" 2>/dev/null || true
+  if [ -f "$CLONE/.git/shallow" ]; then
+    git -C "$CLONE" fetch -q --unshallow origin 2>/dev/null \
+      || git -C "$CLONE" fetch -q --depth=50 origin 2>/dev/null || true
+  fi
   out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$CLONE" 2>&1) || true
   echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
     || bad "updater con repo" "$(echo "$out" | tail -n 2)"
