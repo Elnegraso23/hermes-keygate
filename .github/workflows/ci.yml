@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar KeePassXC (para keepassxc-cli)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq keepassxc
+
+      - name: Selftest (host fresco)
+        run: bash scripts/keygate-selftest.sh
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Sintaxis Python del plugin y del sync
+        run: |
+          python3 -m py_compile __init__.py keygate_lib.py
+          python3 -m py_compile sync/keygate_sync.py
+          echo "compila OK"
+      - name: Bash sintaxis de los scripts
+        run: |
+          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull; do
+            bash -n "$f" || exit 1
+          done
+          echo "scripts OK"
