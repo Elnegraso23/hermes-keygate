@@ -96,6 +96,10 @@ fi
 git -C "$REPO" rev-parse HEAD >/dev/null 2>&1 || { bad "repo git" "el repo del selftest no es git"; }
 CLONE="$TMP/cloned-repo"
 if git clone -q --no-hardlinks "$REPO" "$CLONE" 2>/dev/null; then
+  # El clon debe ser autónomo: su origin NO puede seguir apuntando al repo
+  # original (que puede ser un remoto PRIVADO de GitHub -> "git pull" pediría
+  # usuario y el updater fallaría sin ser un bug suyo). Se apunta a sí mismo.
+  git -C "$CLONE" remote set-url origin "$CLONE" 2>/dev/null || true
   out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$CLONE" 2>&1) || true
   echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
     || bad "updater con repo" "$(echo "$out" | tail -n 2)"
