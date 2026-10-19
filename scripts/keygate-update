@@ -19,7 +19,33 @@ DEST="$HOME/.hermes/plugins/keygate"
 echo "== keygate-update =="
 [ -d "$REPO/.git" ] || { echo "no hay repo en $REPO" >&2; exit 2; }
 BEFORE=$(git -C "$REPO" rev-parse --short HEAD)
-git -C "$REPO" pull --ff-only 2>&1 | tail -n 2 || { echo "pull falló (¿cambios locales? haz stash primero)" >&2; exit 2; }
+# `git pull --ff-only` sin refspec exige que la rama actual tenga upstream.
+# Si no lo tiene (clon recién hecho, rama sin tracking, checkout detached),
+# el pull falla con "no tracking information" y el update no avanza. Se
+# intenta el pull normal y, si falla, se reintenta con el refspec explícito
+# de la rama actual -> así el update funciona en cualquier clon, tracking o
+# no. Los errores de git REALES (cambios locales, conflictos) siguen
+# abortando el update.
+pull_out=$(git -C "$REPO" pull --ff-only 2>&1) && pull_ok=1 || pull_ok=0
+if [ "$pull_ok" != 1 ]; then
+  BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  case "$BR" in
+    HEAD|"")
+      # HEAD detached: no hay rama que actualizar; se usa la rama por defecto.
+      BR=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+      [ -z "$BR" ] && BR="main"
+      ;;
+  esac
+  pull_out2=$(git -C "$REPO" pull --ff-only origin "$BR" 2>&1) && pull_ok=1 || pull_ok=0
+  if [ "$pull_ok" = 1 ]; then
+    echo "$pull_out" | tail -n 2
+    pull_out="$pull_out2"
+  else
+    echo "$pull_out" | tail -n 2
+    echo "pull falló (¿cambios locales? haz stash primero)" >&2
+    exit 2
+  fi
+fi
 AFTER=$(git -C "$REPO" rev-parse --short HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then echo "sin cambios nuevos ($AFTER); reinstalando igual para fijar marcador"; fi
 echo "repo: $BEFORE -> $AFTER"

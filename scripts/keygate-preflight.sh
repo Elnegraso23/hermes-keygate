@@ -33,7 +33,18 @@ if command -v keepassxc-cli >/dev/null 2>&1; then
   fi
 fi
 
-if [ -w "$HOME" ]; then say "ok: HOME escribible ($HOME)"; else say "FALTA: HOME no escribible ($HOME)"; fail=1; fi
+# HOME escribible. OJO: [ -w ] sobre un path que AUN NO EXISTE devuelve false
+# (bash no puede saber si un dir inexistente sería escribible), así que un
+# home recién creado por el instalador daba "HOME no escribible" y el
+# preflight FALLABA en hosts perfectamente válidos. Se comprueba tentando
+# escribir de verdad, y se crea el home si falta.
+if mkdir -p "$HOME" 2>/dev/null && [ -d "$HOME" ] && touch "$HOME/.kg-preflight-write-test" 2>/dev/null; then
+  rm -f "$HOME/.kg-preflight-write-test"
+  say "ok: HOME escribible ($HOME)"
+else
+  say "FALTA: HOME no escribible ($HOME)"
+  fail=1
+fi
 
 if mkdir -p "$(dirname "$DB")" 2>/dev/null; then
   say "ok: dir del vault $([ -d "$(dirname "$DB")" ] && echo existe || echo creado)"
