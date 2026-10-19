@@ -94,24 +94,29 @@ fi
 # updater. Por eso el selftest clona el repo a un clon LOCAL (file://, offline,
 # sin red ni credenciales) y prueba el updater contra ese clon.
 git -C "$REPO" rev-parse HEAD >/dev/null 2>&1 || { bad "repo git" "el repo del selftest no es git"; }
+# Repo de prueba AUTÓNOMO, con su propio origin local y una rama real.
+# No se clona $REPO: en CI el checkout de actions/checkout queda en HEAD
+# DETACHED y sin ramas locales, así que el clon heredaba esa condición
+# (sin rama, sin upstream) y el 'git pull --ff-only' del updater fallaba con
+# "couldn't find remote ref main" -> falso negativo que NO era un bug del
+# updater. Se arma a mano un repo con rama + origin local: determinista.
 CLONE="$TMP/cloned-repo"
-if git clone -q --no-hardlinks "$REPO" "$CLONE" 2>/dev/null; then
-  # El clon debe ser AUTÓNOMO. El origin heredado apunta al repo de origen,
-  # que en CI es el checkout shallow de actions/checkout (origin = GitHub).
-  # Si ese origin es PRIVADO, el "git pull --ff-only" del updater pide usuario
-  # (sin tty) y falla con "could not read Username" -> falso negativo que NO
-  # es un bug del updater. Ademas un clon shallow no puede hacer ff-only.
-  # Fix: origin = el propio clon, y se des-shallowiza si hizo falta.
-  git -C "$CLONE" remote set-url origin "$CLONE" 2>/dev/null || true
-  if [ -f "$CLONE/.git/shallow" ]; then
-    git -C "$CLONE" fetch -q --unshallow origin 2>/dev/null \
-      || git -C "$CLONE" fetch -q --depth=50 origin 2>/dev/null || true
-  fi
+CLONE_ORIGIN="$TMP/cloned-origin.git"
+rm -rf "$CLONE" "$CLONE_ORIGIN"
+if mkdir -p "$CLONE" && git init -q -b main "$CLONE" 2>/dev/null; then
+  # Snapshot del código del repo (sin .git) como contenido del repo de prueba.
+  (cd "$REPO" && tar --exclude=.git -cf - .) | (cd "$CLONE" && tar -xf -) 2>/dev/null
+  git -C "$CLONE" add -A >/dev/null 2>&1
+  git -C "$CLONE" -c user.email=selftest@local -c user.name=selftest \
+      commit -qm "snapshot para el test del updater" >/dev/null 2>&1
+  git init -q --bare "$CLONE_ORIGIN" 2>/dev/null
+  git -C "$CLONE" remote add origin "$CLONE_ORIGIN" 2>/dev/null || true
+  git -C "$CLONE" push -q -u origin main >/dev/null 2>&1 || git -C "$CLONE" push -q origin main >/dev/null 2>&1
   out=$(HOME="$TMP" bash "$REPO/scripts/keygate-update" "$CLONE" 2>&1) || true
   echo "$out" | grep -qE "instalado en|sin cambios" && ok "updater con repo real instala" \
     || bad "updater con repo" "$(echo "$out" | tail -n 2)"
 else
-  bad "updater con repo" "no se pudo clonar el repo para el test"
+  bad "updater con repo" "no se pudo crear el repo de prueba"
 fi
 
 # --- 7b. updater JAMÁS toca vault/keyfile/pass/flag (garantía de actualización) ---

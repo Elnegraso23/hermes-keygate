@@ -40,7 +40,10 @@ if [ "$pull_ok" != 1 ]; then
     # find remote ref main").
     BR=$(git -C "$REPO" for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null \
            | grep -v -E 'HEAD$|^origin$' | head -n 1 | sed 's|^origin/||' || true)
-    [ -z "$BR" ] && BR="main"
+    # Si tampoco hay refs remotas (clone muy nuevo o checkout shallow sin
+    # refs), se usa la rama local actual: es la que el usuario está usando.
+    [ -z "$BR" ] && BR=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+    [ -z "$BR" ] || [ "$BR" = "HEAD" ] && BR="main"
   fi
   pull_out2=$(git -C "$REPO" pull --ff-only origin "$BR" 2>&1) && pull_ok=1 || pull_ok=0
   if [ "$pull_ok" = 1 ]; then
