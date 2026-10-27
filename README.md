@@ -1,6 +1,7 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
+**Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.5.0--alfa-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0--alfa-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
@@ -61,7 +62,7 @@ hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
 **Garantías:**
 
 - El password/TOTP **nunca** entra al contexto del modelo, logs, SQLite, Telegram ni audit (solo hints `j***@x.com`). Verificado con canario: `scripts/keygate-leakcheck.py` (PASS).
-- Sin aprobación explícita no hay fill (fail-closed verificado; ni timeouts ni errores aprueban). La aprobación es lo último: pre-flight de pestaña viva primero.
+- Sin aprobación explícita no hay fill (fail-closed verificado; ni timeouts ni errores aprueban). La aprobación es lo último: pre-flight de pestaña viva primero. Única excepción: un alias con política de auto-relleno activa para ese origin exacto (ver § Sin aprobación por cuenta).
 - Amarre exacto de origen (vault-URL == origen pedido == origen de la pestaña, re-chequeado dentro del script contra TOCTOU).
 - Cada fill deja auditoría redactada (`~/.hermes/keygate-audit.jsonl`).
 - Altas/bajas de credenciales **desde el chat están bloqueadas por política**: los cambios se hacen en tu KeePassXC + sync del `.kdbx`.

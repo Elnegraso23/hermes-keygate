@@ -18,7 +18,7 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
   subdominio vuelve a pedir aprobación); cron/one-shot siguen rechazados aunque
   la política esté activa.
 - Tests: `tests/test_autofill_policy.py` (aislado, sin Hermes) + paso nuevo en CI.
-- Docs: sección “Sin aprobación por cuenta” en el README y troubleshooting del
+- Docs: README bilingüe (`README.md` español + `README.en.md` inglés, con selector de idioma), sección “Sin aprobación por cuenta” y troubleshooting del
   `ExecStart` que puede capturar un venv efímero al instalar desde una sesión de
   agente (usar `/usr/bin/python3`).
 
