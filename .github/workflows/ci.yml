@@ -53,3 +53,5 @@ jobs:
             bash -n "$f" || exit 1
           done
           echo "scripts OK"
+      - name: Autofill policy tests
+        run: python3 -m unittest discover -s tests -p 'test_autofill*.py' -v

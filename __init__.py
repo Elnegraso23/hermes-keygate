@@ -518,32 +518,40 @@ def register(ctx):
         # elicitation API — the same path native vault uses for card fills.
         # Unattended contexts (cron, -q) cannot prompt: refuse immediately
         # with a distinct error instead of a silent decline.
+        # Unattended contexts (cron, -q) cannot prompt: refuse immediately,
+        # even when an auto-policy exists — a per-alias policy must never
+        # enable a headless credential fill the human cannot see.
         _ch = _channel_diag()
         if _ch.get("cron") or _ch.get("single_query"):
             return json.dumps({"success": False, "error_type": "unattended",
                                "error": ("this session cannot prompt (cron/one-shot): "
                                          "run from an interactive CLI/Desktop/Telegram session")})
-        try:
-            from tools.approval_prompt import request_elicitation_consent
-            decision = request_elicitation_consent(
-                f"Fill login {kg.redact_label(alias)} on {kg.redact_origin(origin)}?",
-                ("Hermes wants KeePass to enter this site's username and password "
-                 "into the page (TOTP too when the entry has a seed). Secrets never "
-                 "enter the chat, logs or memory — only this prompt. One-time use: "
-                 "the next fill asks again."),
-                surface="keygate-fill", title="Allow credential fill?")
-        except Exception as exc:
-            return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
-        approval_evidence = {"approval": str(decision)}
-        if decision != "accept":
-            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                               "origin": kg.redact_origin(origin), "decision": "deny",
-                               **approval_evidence})
-            return json.dumps({"success": False, "error": "user denied (explicit approval required)",
-                               "error_type": "denied", "channel": _ch,
-                               "hint": ("If no prompt was shown, this session has no approval UI "
-                                        "path: report `channel` + run keygate_doctor. Never retry "
-                                        "silently and never use execute_code/curl with credentials.")})
+        auto = kg.autofill_allows(_home(), match.split("/")[-1], origin)
+        approval_evidence = {}
+        if auto:
+            approval_evidence = {"approval": "auto-policy"}
+        else:
+            try:
+                from tools.approval_prompt import request_elicitation_consent
+                decision = request_elicitation_consent(
+                    f"Fill login {kg.redact_label(alias)} on {kg.redact_origin(origin)}?",
+                    ("Hermes wants KeePass to enter this site's username and password "
+                     "into the page (TOTP too when the entry has a seed). Secrets never "
+                     "enter the chat, logs or memory — only this prompt. One-time use: "
+                     "next fill asks again."),
+                    surface="keygate-fill", title="Allow credential fill?")
+            except Exception as exc:
+                return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
+            approval_evidence = {"approval": str(decision)}
+            if decision != "accept":
+                kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
+                                   "origin": kg.redact_origin(origin), "decision": "deny",
+                                   **approval_evidence})
+                return json.dumps({"success": False, "error": "user denied (explicit approval required)",
+                                   "error_type": "denied", "channel": _ch,
+                                   "hint": ("If no prompt was shown, this session has no approval UI "
+                                            "path: report `channel` + run keygate_doctor. Never retry "
+                                            "silently and never use execute_code/curl with credentials.")})
 
         # 2-4) Blind fill through the native secret-safe path (exact-origin
         # binding, inspect+classify, CDP WebSocket only, redaction boundary).
@@ -551,12 +559,15 @@ def register(ctx):
         # the conversation (strict redaction).
         filled = _native_keygate_fill(kw.get("task_id") or params.get("task_id") or "default",
                                       alias, origin, db, kf)
-        kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
-                           "origin": kg.redact_origin(origin),
-                           "decision": "allow" if filled.get("success") else filled.get("error_type", "refused"),
-                           "filled": filled.get("filled_fields", 0),
-                           "totp": filled.get("totp_filled", False),
-                           **approval_evidence})
+        audit_rec = {"ev": "fill", "alias": kg.redact_label(alias),
+                     "origin": kg.redact_origin(origin),
+                     "decision": "allow" if filled.get("success") else filled.get("error_type", "refused"),
+                     "filled": filled.get("filled_fields", 0),
+                     "totp": filled.get("totp_filled", False),
+                     **approval_evidence}
+        if auto:
+            audit_rec["policy"] = "alias-auto"
+        kg.audit(_home(), audit_rec)
         out = {"success": bool(filled.get("success")), "filled_fields": filled.get("filled_fields", 0),
                "origin": filled.get("origin", origin), "totp_filled": filled.get("totp_filled", False)}
         if not out["success"]:
@@ -570,7 +581,8 @@ def register(ctx):
                 "description": ("Request a blind login fill. FIRST navigate to the login page "
                                 "with browser_navigate (agent browser, not Desktop preview). Shows "
                                 "an approval prompt on YOUR screen (accept = one-time fill, anything "
-                                "else denies); checks vault-URL == page origin, resolves KeePass "
+                                "else denies); if the alias has an active autofill policy, no approval prompt "
+                                "is required. Checks vault-URL == page origin, resolves KeePass "
                                 "server-side and fills user+password (+TOTP) via CDP. "
                                 "AFTER a successful fill, submit the SAME form without re-navigating "
                                 "(re-navigate clears the filled values), then read the flash message. "

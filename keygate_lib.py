@@ -21,6 +21,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 TIMEOUT = 30.0
 AUDIT_NAME = "keygate-audit.jsonl"
@@ -281,3 +282,83 @@ def session_invalidate(domain: str) -> bool:
         return True
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------- autofill policies ---
+
+def normalize_origin(origin: Optional[str]) -> str:
+    s = (origin or "").strip()
+    if not s:
+        return ""
+    try:
+        parsed = urlsplit(s)
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in ("http", "https"):
+            return ""
+        netloc = (parsed.netloc or "").lower()
+        if not netloc:
+            return ""
+        return f"{scheme}://{netloc}"
+    except Exception:
+        return ""
+
+
+def autofill_path(home: Path | str) -> Path:
+    h = Path(home) if isinstance(home, (str, Path)) else Path.home() / ".hermes"
+    return h / "keygate-autofill.json"
+
+
+def load_autofill(home: Path | str) -> dict:
+    fp = autofill_path(home)
+    try:
+        if fp.exists():
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "policies" in data:
+                return data
+    except Exception:
+        pass
+    return {"version": 1, "policies": {}}
+
+
+def save_autofill(home: Path | str, data: dict) -> None:
+    fp = autofill_path(home)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = fp.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, fp)
+
+
+def set_autofill(home: Path | str, alias: str, origin: str, enabled: bool) -> None:
+    data = load_autofill(home)
+    if not enabled:
+        if "policies" in data and alias in data["policies"]:
+            del data["policies"][alias]
+    else:
+        norm = normalize_origin(origin)
+        if not norm:
+            return
+        if "policies" not in data:
+            data["policies"] = {}
+        data["policies"][alias] = {
+            "origin": norm,
+            "enabled": True,
+            "created": int(time.time()),
+            "source": "web"
+        }
+    save_autofill(home, data)
+
+
+def autofill_allows(home: Path | str, alias: str, origin: str) -> bool:
+    norm_req = normalize_origin(origin)
+    if not norm_req:
+        return False
+    data = load_autofill(home)
+    policies = data.get("policies", {})
+    pol = policies.get(alias)
+    if not pol or not pol.get("enabled"):
+        return False
+    norm_pol = normalize_origin(pol.get("origin", ""))
+    if not norm_pol:
+        return False
+    return norm_req == norm_pol

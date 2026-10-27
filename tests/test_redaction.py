@@ -1,6 +1,7 @@
 """Redaction + ref parsing invariants (no Hermes imports: runs anywhere)."""
+import os
 import sys
-sys.path.insert(0, "/home/user/hermes-keygate")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import keygate_lib as kg
 
 

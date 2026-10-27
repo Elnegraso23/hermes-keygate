@@ -118,6 +118,38 @@ Alternativa mismo-PC (sin pagina): abre `~/Documentos/hermes.kdbx` directo en
 KeePassXC con `~/.keepass-agent.key`. La pagina sigue siendo el camino normal —
 un agente que instale esto debe ofrecerla PRIMERO, siempre.
 
+## Sin aprobación por cuenta (auto-relleno)
+
+Si una cuenta te obliga a loguearte muchas veces, puedes marcar **solo esa
+cuenta** para que el relleno no pida aprobación cada vez. Se hace desde la web
+de `keygate-sync`, con la misma contraseña de la web:
+
+1. Abre `http://<ip-tailscale>:8472/` e inicia sesión.
+2. En **“Aliases y auto-relleno”**, cada alias muestra un campo de *origin*
+   (prellenado con la URL guardada en la entrada del vault) y una casilla
+   **“Sin aprobación”**.
+3. Marca la casilla y pulsa **Guardar**.
+
+Qué hace exactamente:
+
+- La política vive en `~/.hermes/keygate-autofill.json` (0600, escritura atómica),
+  una entrada por alias: `{ "origin": "https://host", "enabled": true }`.
+- En el siguiente fill, si el alias tiene política activa **y el origin coincide
+  exacto**, se rellena sin prompt y se audita `approval: "auto-policy"` +
+  `policy: "alias-auto"`.
+- El origin se compara normalizado (`scheme://host:puerto`). Cambiar de esquema,
+  puerto o subdominio **vuelve a pedir aprobación**.
+- Al activarlo, la web exige que el host del origin coincida con la URL de la
+  entrada en el vault; si no, responde `400 origin host does not match the
+  vault entry URL`.
+- Sesiones desatendidas (cron / one-shot) siguen rechazadas: la política no
+  habilita logins headless.
+- Desmarcar la casilla y guardar borra la política (vuelve el prompt normal).
+
+Riesgo que asumes: mientras la política esté activa, cualquier fill de ese alias
+en ese origin exacto se ejecuta sin que lo veas. Actívala solo en cuentas y
+sitios que controles; para todo lo demás, deja el prompt.
+
 ## Uso diario (keygate es el default)
 
 El plugin instala la skill `keygate-default`: ante un *"logueate en <sitio>"*,

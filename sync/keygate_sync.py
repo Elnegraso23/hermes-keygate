@@ -238,7 +238,8 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 <button class="ghost" onclick="load()">↻ Recargar</button>
 </div></div>
 
-<h2>Aliases</h2>
+<h2>Aliases y auto-relleno</h2>
+<div class="card"><div class="sub" style="margin:0">Marca <b>Sin aprobación</b> en una cuenta para que su relleno no pida confirmación. Solo vale para el origin exacto indicado, y debe coincidir con la URL guardada en la entrada del vault.</div></div>
 <div class="card" id="aliases"><div class="sub">Cargando…</div></div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
@@ -351,9 +352,24 @@ async function load() {
   const ds = document.getElementById('dbstate');
   ds.textContent = b.locked ? '🔒 DB bloqueada' : '🟢 DB ok';
   ds.className = 'badge ' + (b.locked ? 'bad' : 'ok');
-  document.getElementById('count').textContent = (b.items || []).length + ' aliases';
-  document.getElementById('aliases').innerHTML = (b.items && b.items.length)
-    ? b.items.map(i => `<div class="alias"><div><b>${esc(i.alias)}</b><br><small>${esc(i.hint)}</small></div></div>`).join('')
+  const items = b.items || [];
+  window.__aliases = items.map(x => x.alias);
+  const af = await api('/api/autofill');
+  const amap = {};
+  ((af.body && af.body.items) || []).forEach(x => { amap[x.alias] = x; });
+  document.getElementById('count').textContent = items.length + ' aliases';
+  document.getElementById('aliases').innerHTML = items.length
+    ? items.map((it, i) => {
+        const p = amap[it.alias] || {enabled: false, origin: '', suggested_origin: ''};
+        const val = p.enabled ? (p.origin || '') : (p.suggested_origin || '');
+        return `<div class="alias"><div><b>${esc(it.alias)}</b><br><small>${esc(it.hint)}</small></div>` +
+          `<div class="row" style="gap:6px">` +
+          `<input id="ao_${i}" value="${esc(val)}" placeholder="https://sitio" ` +
+          `style="width:210px;padding:7px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt);font-size:13px">` +
+          `<label class="badge${p.enabled ? ' ok' : ''}" style="display:flex;align-items:center;gap:6px;cursor:pointer">` +
+          `<input type="checkbox" id="ae_${i}" ${p.enabled ? 'checked' : ''}> Sin aprobación</label>` +
+          `<button class="ghost" onclick="saveAuto(${i})">Guardar</button></div></div>`;
+      }).join('')
     : '<div class="sub">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
   const a = await api('/api/audit?limit=8');
   document.getElementById('audit').innerHTML = (a.body.lines || []).slice().reverse()
@@ -369,6 +385,25 @@ async function load() {
       (n ? `✅ .kdbx con ${n} alias` : '⬜ .kdbx vacío — súbelo con tus copias') + '<br>' +
       (served ? '✅ .key descargado (botón muerto)' : '⬜ .key sin descargar (una sola vez)');
   } catch (e) { document.getElementById('checklist').textContent = 'No se pudo leer el estado.'; }
+}
+async function saveAuto(i) {
+  const alias = (window.__aliases || [])[i];
+  const on = document.getElementById('ae_' + i).checked;
+  const inp = document.getElementById('ao_' + i);
+  let origin = (inp.value || '').trim();
+  if (on && !origin) {
+    origin = (prompt('Origin exacto para ' + alias + ' (ej. https://accounts.google.com):') || '').trim();
+    if (!origin) { document.getElementById('ae_' + i).checked = false; return; }
+    inp.value = origin;
+  }
+  const h = Object.assign({'Content-Type': 'application/json'}, authHeaders());
+  const r = await api('/api/autofill', {method: 'POST', headers: h,
+    body: JSON.stringify({alias: alias, origin: origin, enabled: on})});
+  if (r.status !== 200 || !(r.body && r.body.success)) {
+    alert('No se pudo guardar: ' + ((r.body && r.body.error) || r.status));
+    return;
+  }
+  load();
 }
 const drop = document.getElementById('drop'), fi = document.getElementById('f');
 drop.onclick = () => fi.click();
@@ -595,6 +630,30 @@ class Handler(BaseHTTPRequestHandler):
                 lines = []
             self._send(200, {"success": True, "lines": lines})
             return
+        if url.path == "/api/autofill":
+            # Per-alias auto-fill policies: metadata only (alias, origins).
+            # The policy file is shared with the plugin (same HOME).
+            if kg.db_locked(db, kf):
+                self._send(200, {"success": False, "locked": True, "items": []})
+                return
+            data = kg.load_autofill(self._home())
+            policies = data.get("policies", {}) if isinstance(data, dict) else {}
+            items = []
+            for e in kg.list_entries(db, kf)[:200]:
+                alias = e.split("/")[-1]
+                try:
+                    sug = kg.normalize_origin(kg.show_field(db, kf, e, "url") or "")
+                except Exception:
+                    sug = ""
+                pol = policies.get(alias) if isinstance(policies, dict) else None
+                if not isinstance(pol, dict):
+                    pol = {}
+                items.append({"alias": alias, "hint": kg.hint_for(alias, ""),
+                              "enabled": bool(pol.get("enabled")),
+                              "origin": str(pol.get("origin") or "") if pol.get("enabled") else "",
+                              "suggested_origin": sug})
+            self._send(200, {"success": True, "locked": False, "items": items})
+            return
         self._send(404, {"success": False, "error": "not found"})
 
     def do_POST(self):
@@ -671,6 +730,67 @@ class Handler(BaseHTTPRequestHandler):
                 return
             audit_ev(self._home(), {"ev": "sync", "action": "password-reset"})
             self._send(200, {"success": True})
+            return
+        if url.path == "/api/autofill":
+            # Toggle a per-alias auto-fill policy. Requires the web session
+            # (Bearer) plus an origin that matches the vault entry's URL host:
+            # the policy can never widen what the phishing guard already allows.
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 4096:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                j = json.loads(self.rfile.read(length).decode())
+                alias = str(j.get("alias") or "").strip()
+                origin = str(j.get("origin") or "").strip()
+                enabled = bool(j.get("enabled"))
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            if not alias:
+                self._send(400, {"success": False, "error": "alias required"})
+                return
+            if kg.db_locked(db, kf):
+                self._send(400, {"success": False, "locked": True,
+                                 "error": "operative DB locked"})
+                return
+            entry = next((e for e in kg.list_entries(db, kf)
+                          if e.split("/")[-1] == alias), None)
+            if not entry:
+                self._send(404, {"success": False,
+                                 "error": "alias not found in operative vault"})
+                return
+            if enabled:
+                norm = kg.normalize_origin(origin)
+                if not norm:
+                    self._send(400, {"success": False,
+                                     "error": "origin must be http(s)://host"})
+                    return
+                try:
+                    vault_url = kg.show_field(db, kf, entry, "url") or ""
+                except Exception:
+                    vault_url = ""
+                vnorm = kg.normalize_origin(vault_url)
+                if vnorm:
+                    if urlparse(norm).hostname != urlparse(vnorm).hostname:
+                        self._send(400, {"success": False,
+                                         "error": ("origin host does not match the "
+                                                   "vault entry URL")})
+                        return
+                kg.set_autofill(self._home(), alias, norm, True)
+                audit_ev(self._home(), {"ev": "sync", "action": "autofill-policy",
+                                        "alias": kg.redact_label(alias),
+                                        "origin": kg.redact_origin(norm),
+                                        "enabled": True})
+                self._send(200, {"success": True, "alias": alias,
+                                 "enabled": True, "origin": norm})
+            else:
+                kg.set_autofill(self._home(), alias, origin, False)
+                audit_ev(self._home(), {"ev": "sync", "action": "autofill-policy",
+                                        "alias": kg.redact_label(alias),
+                                        "origin": kg.redact_origin(origin),
+                                        "enabled": False})
+                self._send(200, {"success": True, "alias": alias, "enabled": False})
             return
         length = int(self.headers.get("Content-Length") or 0)
         if length <= 0 or length > MAX_UPLOAD + 65536:

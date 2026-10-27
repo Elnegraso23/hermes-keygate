@@ -3,6 +3,8 @@ __pycache__/
 *.kdbx
 *.key
 *-audit.jsonl
+keygate-autofill.json
+*.bak*
 .pytest_cache/
 .venv/
 venv/

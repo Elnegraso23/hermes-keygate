@@ -4,6 +4,24 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.0 — 2026-10-26
+- **Auto-relleno por alias (opt-in desde la web)**: política por cuenta en
+  `~/.hermes/keygate-autofill.json` (0600, escritura atómica). Si el alias tiene
+  política activa y el origin coincide exacto, `keygate_request_fill` rellena sin
+  pedir aprobación; se audita `approval: "auto-policy"` + `policy: "alias-auto"`.
+- Web `keygate-sync`: `GET /api/autofill` (lista con `suggested_origin` tomado de
+  la URL del vault) y `POST /api/autofill {alias, origin, enabled}` (Bearer), más
+  la casilla **“Sin aprobación”** por alias en el dashboard. El POST rechaza con
+  `400` un origin cuyo host no coincida con la URL de la entrada y valida contra
+  un vault bloqueado.
+- Guardas: comparación normalizada `scheme://host:puerto` (otro esquema, puerto o
+  subdominio vuelve a pedir aprobación); cron/one-shot siguen rechazados aunque
+  la política esté activa.
+- Tests: `tests/test_autofill_policy.py` (aislado, sin Hermes) + paso nuevo en CI.
+- Docs: sección “Sin aprobación por cuenta” en el README y troubleshooting del
+  `ExecStart` que puede capturar un venv efímero al instalar desde una sesión de
+  agente (usar `/usr/bin/python3`).
+
 ## 0.5.0 — 2026-10-16
 - Auditoría externa integrada (3 fixes verificados + 8 propuestas triageadas):
   `rotate_backups` borraba 1 de más (off-by-one real); staging del upload en el
