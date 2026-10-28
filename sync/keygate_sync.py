@@ -54,6 +54,7 @@ import keygate_lib as kg
 MAX_UPLOAD = 10 * 1024 * 1024
 RATE_MAX = 60  # requests per window per IP
 RATE_WINDOW = 60.0
+AUTH_FAIL_MAX = 8  # wrong-password attempts per window per IP
 PW_MIN_LEN = 12
 PW_ITERS = 210_000
 
@@ -167,63 +168,86 @@ INDEX_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>keygate-sync</title>
 <style>
-:root{color-scheme:dark;--bg:#101418;--card:#1a2129;--line:#2a3440;--txt:#dbe4ee;
---mut:#8fa1b5;--acc:#4cc38a;--warn:#e5b567;--bad:#ef6461;--btn:#2f6fed}
+:root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--card2:#1c232d;--line:#2a3440;--txt:#e6edf3;
+--mut:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149;--btn:#2f6fed;--btn-h:#388bfd}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);
 font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-.wrap{max-width:760px;margin:0 auto;padding:24px 16px 64px}
-header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
-.logo{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#2f6fed,#4cc38a);
-display:flex;align-items:center;justify-content:center;font-size:20px}
-h1{font-size:20px;margin:0}h2{font-size:15px;margin:26px 0 10px;color:var(--mut);
-text-transform:uppercase;letter-spacing:.06em}
-.sub{color:var(--mut);font-size:13px;margin:0 0 18px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:10px 0}
+.wrap{max-width:820px;margin:0 auto;padding:24px 16px 64px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#2f6fed,#3fb950);
+display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 12px rgba(0,0,0,.35)}
+h1{font-size:20px;margin:0}h2{font-size:13px;margin:26px 0 10px;color:var(--mut);
+text-transform:uppercase;letter-spacing:.07em;font-weight:600}
+.sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:10px 0}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.badge{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
-.badge.ok{color:var(--acc);border-color:var(--acc)}
-.badge.bad{color:var(--bad);border-color:var(--bad)}
+.badge{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut);background:#0d1117}
+.badge.ok{color:var(--acc);border-color:rgba(63,185,80,.45);background:rgba(63,185,80,.08)}
+.badge.warn{color:var(--warn);border-color:rgba(210,153,34,.45);background:rgba(210,153,34,.08)}
+.badge.bad{color:var(--bad);border-color:rgba(248,81,73,.45);background:rgba(248,81,73,.08)}
 .alias{display:flex;justify-content:space-between;align-items:center;gap:10px;
-padding:9px 2px;border-bottom:1px solid var(--line)}
+padding:11px 4px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .alias:last-child{border-bottom:0}
 .alias b{font-family:ui-monospace,monospace;font-size:14px}
 .alias small{color:var(--mut)}
-button{background:var(--btn);color:#fff;border:0;border-radius:8px;padding:9px 16px;
-font-size:14px;cursor:pointer}
+input[type="password"],input[type="text"],input[type="search"]{
+padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt);font-size:14px}
+input:focus{outline:none;border-color:var(--btn-h)}
+button{background:var(--btn);color:#fff;border:0;border-radius:8px;padding:8px 15px;
+font-size:13.5px;font-weight:500;cursor:pointer;transition:.15s}
+button:hover:not(:disabled){background:var(--btn-h)}
 button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button.ghost:hover:not(:disabled){background:var(--card2);border-color:var(--mut)}
+button.sm{padding:4px 9px;font-size:12px;border-radius:6px}
 button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);padding:6px 12px;font-size:13px}
-button:disabled{opacity:.5;cursor:default}
+button:disabled{opacity:.45;cursor:default}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:26px;text-align:center;
-color:var(--mut);cursor:pointer;transition:.15s}
-.drop.over{border-color:var(--acc);color:var(--acc)}
+color:var(--mut);cursor:pointer;transition:.15s;background:rgba(13,17,23,.4)}
+.drop:hover,.drop.over{border-color:var(--acc);color:var(--acc);background:rgba(63,185,80,.05)}
 pre{background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:10px;
-font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto}
+font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:10px 0 0}
 .audit{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut)}
-.topbar{display:flex;justify-content:flex-end;margin-bottom:4px}
-.hide{display:none}
-footer{color:var(--mut);font-size:12px;margin-top:26px}
-code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
+.audit-row{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(42,52,64,.6);flex-wrap:wrap}
+.audit-row:last-child{border-bottom:0}
+.topbar{display:flex;gap:8px;align-items:center}
+.hide{display:none!important}
+footer{color:var(--mut);font-size:12px;margin-top:28px;text-align:center}
+code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px;border:1px solid var(--line)}
+a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 </style></head><body><div class="wrap">
-<div class="topbar"><button class="ghost" id="logout" onclick="logout()">Cerrar sesión</button></div>
-<header><div class="logo">🔑</div><div><h1>keygate-sync</h1>
-<div class="sub">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></header>
+<header>
+  <div class="brand"><div class="logo">🔑</div><div><h1>keygate-sync</h1>
+  <div class="sub" style="margin:0">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></div>
+  <div class="topbar" id="userbar" style="display:none">
+    <button class="ghost sm" onclick="togglePwReset()">🔒 Cambiar clave</button>
+    <button class="ghost sm" id="logout" onclick="logout()">Cerrar sesión</button>
+  </div>
+</header>
 
 <div class="card" id="setupcard" style="display:none;border-color:var(--warn)">
-<h2 style="margin-top:0">Crea tu contraseña (primera y única vez)</h2>
+<h2 style="margin-top:0;color:var(--warn)">Crea tu contraseña (primera y única vez)</h2>
 <div class="sub">No hay contraseña por defecto. Mínimo 12 caracteres. Se guarda con PBKDF2 en el host; aquí solo vive en esta pestaña.</div>
-<div class="row"><input type="password" id="pw1" placeholder="Nueva contraseña" style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)">
-<input type="password" id="pw2" placeholder="Repítela" style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)">
-<button onclick="kg_setup()">Crear</button></div>
+<div class="row">
+  <input type="password" id="pw1" placeholder="Nueva contraseña (mín. 12)" style="flex:1;min-width:200px"
+   oninput="checkSetupHint()" onkeydown="if(event.key==='Enter')kg_setup()">
+  <input type="password" id="pw2" placeholder="Repítela" style="flex:1;min-width:200px"
+   oninput="checkSetupHint()" onkeydown="if(event.key==='Enter')kg_setup()">
+  <button class="ghost sm" type="button" onclick="toggleVis(['pw1','pw2'])" title="Mostrar/ocultar">👁</button>
+  <button onclick="kg_setup()">Crear</button>
+</div>
+<div class="sub" id="setuphint" style="margin:8px 0 0;font-size:12px">Longitud: 0 / 12 caracteres mínimo.</div>
 <pre id="setupout" style="display:none"></pre>
 </div>
 
 <div id="logincard" class="card" style="display:none;border-color:var(--acc)">
-<h2 style="margin-top:0">Acceso a keygate-sync</h2>
+<h2 style="margin-top:0;color:var(--acc)">Acceso a keygate-sync</h2>
 <div class="sub">Ingresa la contraseña de la web. No se muestra nada sin ella.</div>
 <div class="row">
 <input type="password" id="loginpw" placeholder="Contraseña" autocomplete="current-password"
- style="flex:1;min-width:200px;padding:9px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt)"
+ style="flex:1;min-width:200px"
  onkeydown="if(event.key==='Enter')kg_login()">
+<button class="ghost sm" type="button" onclick="toggleVis(['loginpw'])" title="Mostrar/ocultar">👁</button>
 <button onclick="kg_login()">Entrar</button>
 </div>
 <pre id="loginout" style="display:none"></pre>
@@ -231,23 +255,45 @@ code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px}
 
 <div id="app" style="display:none">
 
+<div class="card" id="pwresetcard" style="display:none;border-color:var(--warn)">
+  <div class="row" style="justify-content:space-between;margin-bottom:8px">
+    <b style="font-size:14px">Cambiar contraseña de acceso web</b>
+    <button class="ghost sm" onclick="togglePwReset()">✕ Cerrar</button>
+  </div>
+  <div class="sub">Exige tu contraseña actual y una nueva de al menos 12 caracteres. Invalida la anterior al instante.</div>
+  <div class="row">
+    <input type="password" id="curpw" placeholder="Contraseña actual" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
+    <input type="password" id="newpw1" placeholder="Nueva (mín. 12)" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
+    <input type="password" id="newpw2" placeholder="Repetir nueva" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
+    <button class="ghost sm" type="button" onclick="toggleVis(['curpw','newpw1','newpw2'])">👁</button>
+    <button onclick="kg_reset_pw()">Actualizar clave</button>
+  </div>
+  <pre id="pwresetout" style="display:none"></pre>
+</div>
+
 <div class="card"><div class="row">
 <span class="badge" id="dbstate">…</span>
 <span class="badge" id="count">… aliases</span>
+<span class="badge" id="dbmeta">…</span>
 <span style="flex:1"></span>
-<button class="ghost" onclick="load()">↻ Recargar</button>
+<button class="ghost sm" onclick="load()">↻ Recargar</button>
 </div></div>
 
 <h2>Aliases y auto-relleno</h2>
-<div class="card"><div class="sub" style="margin:0">Marca <b>Sin aprobación</b> en una cuenta para que su relleno no pida confirmación. Solo vale para el origin exacto indicado, y debe coincidir con la URL guardada en la entrada del vault.</div></div>
-<div class="card" id="aliases"><div class="sub">Cargando…</div></div>
+<div class="card">
+  <div class="row" style="justify-content:space-between;margin-bottom:10px">
+    <div class="sub" style="margin:0;flex:1">Marca <b>Sin aprobación</b> en una cuenta para que su relleno no pida confirmación. Solo vale para el origin exacto guardado en la URL del vault.</div>
+    <input type="search" id="aliasfilter" placeholder="🔍 Filtrar alias o grupo…" oninput="renderAliases()" style="min-width:210px">
+  </div>
+  <div id="aliases"><div class="sub">Cargando…</div></div>
+</div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
 <div class="card"><div class="sub" id="checklist">Verificando estado…</div>
 <div class="sub" style="margin:0">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
-3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos, guarda.<br>
+3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos y URL exacta, guarda.<br>
 4. <a href="#bajar">Sube el .kdbx editado</a> (pide confirmación, deja backup).<br>
 De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ningún lado.
 </div></div>
@@ -258,9 +304,9 @@ De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ning
 <button class="ghost" onclick="dl()">⬇ Descargar .kdbx actual</button>
 <span class="sub" style="margin:0">Flujo: descarga → edita en KeePassXC (añade copias con alias opacos) → súbelo abajo. Solo viaja ciphertext; sin el .key no se abre.</span>
 </div>
-<div class="drop" id="drop" style="margin-top:10px">Arrastra el <code>.kdbx</code> editado aquí o haz clic para elegirlo
+<div class="drop" id="drop" style="margin-top:12px">Arrastra el <code>.kdbx</code> editado aquí o haz clic para elegirlo
 <input type="file" id="f" accept=".kdbx" class="hide"></div>
-<div class="row" style="margin-top:10px"><button id="upbtn" onclick="up()">Subir y reemplazar</button></div>
+<div class="row" style="margin-top:10px"><button id="upbtn" onclick="up()">⬆ Subir y reemplazar</button></div>
 <pre id="out">Sin subidas todavía.</pre>
 </div>
 
@@ -268,21 +314,78 @@ De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ning
 <div class="card"><div class="row">
 <span class="badge" id="obstate">…</span>
 <button class="ghost" id="obbtn" onclick="onboard()">Descargar .key (una sola vez)</button>
-</div><div class="sub">Guárdalo con permisos 600 en tu PC editor. Tras la primera descarga este botón muere para siempre.</div></div>
+</div><div class="sub" style="margin:8px 0 0">Guárdalo con permisos 600 en tu PC editor. Tras la primera descarga este botón muere para siempre.</div></div>
 
-<h2>Auditoría</h2>
+<div class="row" style="justify-content:space-between;align-items:baseline;margin-top:22px">
+  <h2 style="margin:0">Auditoría reciente</h2>
+  <button class="ghost sm" onclick="toggleAuditRaw()" id="auditmodebtn">Ver JSON crudo</button>
+</div>
 <div class="card audit" id="audit">…</div>
 
 <footer>keygate-sync · red local/Tailscale únicamente · todo cambio deja backup + audit</footer>
 </div>
 </div>
 <script>
+let __auditRaw = false;
+let __lastAuditLines = [];
+let __aliasRows = [];
 function authHeaders() {
   const t = sessionStorage.getItem('kg_t') || '';
   return {'Authorization': 'Bearer ' + t};
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toggleVis(ids) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.type = (el.type === 'password') ? 'text' : 'password';
+  });
+}
+function checkSetupHint() {
+  const a = (document.getElementById('pw1').value || '');
+  const b = (document.getElementById('pw2').value || '');
+  const h = document.getElementById('setuphint');
+  if (!a.length) { h.textContent = 'Longitud: 0 / 12 caracteres mínimo.'; h.style.color = 'var(--mut)'; return; }
+  if (a.length < 12) { h.textContent = `Longitud: ${a.length} / 12 (faltan ${12 - a.length}).`; h.style.color = 'var(--warn)'; return; }
+  if (b && a !== b) { h.textContent = 'Longitud OK, pero las contraseñas aún no coinciden.'; h.style.color = 'var(--bad)'; return; }
+  h.textContent = b ? '✅ Contraseña válida y coincide.' : `✅ Longitud OK (${a.length} caracteres). Repítela al lado.`;
+  h.style.color = 'var(--acc)';
+}
 function logout(){ sessionStorage.removeItem('kg_t'); location.reload(); }
+function showAuthedUI() {
+  document.getElementById('setupcard').style.display = 'none';
+  document.getElementById('logincard').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('userbar').style.display = 'flex';
+}
+function togglePwReset() {
+  const c = document.getElementById('pwresetcard');
+  c.style.display = (c.style.display === 'none') ? 'block' : 'none';
+  document.getElementById('pwresetout').style.display = 'none';
+}
+async function kg_reset_pw() {
+  const cur = document.getElementById('curpw').value;
+  const n1 = document.getElementById('newpw1').value;
+  const n2 = document.getElementById('newpw2').value;
+  const out = document.getElementById('pwresetout');
+  out.style.display = 'block';
+  if (!cur) { out.textContent = 'Ingresa tu contraseña actual.'; return; }
+  if (n1.length < 12) { out.textContent = 'La nueva contraseña debe tener al menos 12 caracteres.'; return; }
+  if (n1 !== n2) { out.textContent = 'La nueva contraseña y su confirmación no coinciden.'; return; }
+  const h = Object.assign({'Content-Type': 'application/json'}, authHeaders());
+  const r = await fetch('/api/reset-password', {method: 'POST', headers: h,
+    body: JSON.stringify({current: cur, new: n1})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.success) {
+    out.textContent = 'Error: ' + (j.error || r.status);
+    return;
+  }
+  sessionStorage.setItem('kg_t', n1);
+  document.getElementById('curpw').value = '';
+  document.getElementById('newpw1').value = '';
+  document.getElementById('newpw2').value = '';
+  out.textContent = '✅ Contraseña actualizada en el host y en esta pestaña.';
+  load();
+}
 async function boot() {
   let st = {};
   try {
@@ -296,8 +399,7 @@ async function boot() {
   document.getElementById('logincard').style.display = 'block';
   if (sessionStorage.getItem('kg_t')) {
     const ok = await kg_verify_token(sessionStorage.getItem('kg_t'));
-    if (ok) { document.getElementById('logincard').style.display = 'none';
-              document.getElementById('app').style.display = 'block'; load(); }
+    if (ok) { showAuthedUI(); load(); }
   }
 }
 async function kg_verify_token(t) {
@@ -312,13 +414,12 @@ async function kg_login() {
   out.style.display = 'block';
   if (!pw) { out.textContent = 'Ingresa la contraseña.'; return; }
   const ok = await kg_verify_token(pw);
-  if (!ok) { out.textContent = 'Contraseña incorrecta.';
+  if (!ok) { out.textContent = 'Contraseña incorrecta (o límite de intentos alcanzado).';
              document.getElementById('loginpw').value = ''; return; }
   sessionStorage.setItem('kg_t', pw);
   document.getElementById('loginpw').value = '';
   out.style.display = 'none';
-  document.getElementById('logincard').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
+  showAuthedUI();
   load();
 }
 async function kg_setup() {
@@ -335,16 +436,91 @@ async function kg_setup() {
   } catch (e) { out.textContent = 'Servidor no responde.'; return; }
   sessionStorage.setItem('kg_t', a);
   document.getElementById('pw1').value = document.getElementById('pw2').value = '';
-  document.getElementById('setupcard').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
+  showAuthedUI();
   load();
 }
 async function api(p, o) {
   const r = await fetch(p, Object.assign({headers: authHeaders()}, o));
   const j = await r.json().catch(() => ({}));
-  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Contraseña incorrecta, recarga e inténtalo de nuevo'); }
+  if (r.status === 401) { sessionStorage.removeItem('kg_t'); alert('Sesión expirada o contraseña cambiada; vuelve a entrar.'); location.reload(); }
   if (r.status === 403 && j.setup_required) { location.reload(); return {status: r.status, body: j}; }
   return {status: r.status, body: j};
+}
+async function copyAlias(i, btn) {
+  const alias = (window.__aliases || [])[i];
+  if (!alias || !navigator.clipboard) return;
+  try {
+    await navigator.clipboard.writeText(alias);
+    const old = btn.textContent;
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.textContent = old; }, 1400);
+  } catch (e) {}
+}
+function renderAliases() {
+  const q = ((document.getElementById('aliasfilter') || {}).value || '').trim().toLowerCase();
+  const box = document.getElementById('aliases');
+  if (!__aliasRows.length) {
+    box.innerHTML = '<div class="sub" style="margin:0">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
+    return;
+  }
+  const filtered = __aliasRows.filter(r => !q || r.alias.toLowerCase().includes(q) || (r.group || '').toLowerCase().includes(q));
+  if (!filtered.length) {
+    box.innerHTML = '<div class="sub" style="margin:0">Ningún alias coincide con el filtro.</div>';
+    return;
+  }
+  box.innerHTML = filtered.map(r => {
+    const i = r.idx;
+    const p = r.policy;
+    const val = p.enabled ? (p.origin || '') : (p.suggested_origin || '');
+    const grp = r.group ? `<span class="badge" style="margin-left:6px;font-size:11px">📁 ${esc(r.group)}</span>` : '';
+    return `<div class="alias"><div><div class="row" style="gap:6px"><b>${esc(r.alias)}</b>${grp}` +
+      `<button class="ghost sm" onclick="copyAlias(${i}, this)" title="Copiar alias para el chat">📋 Copiar</button></div>` +
+      `<small>Hint: ${esc(r.hint)}</small></div>` +
+      `<div class="row" style="gap:6px">` +
+      `<input type="text" id="ao_${i}" value="${esc(val)}" placeholder="https://sitio" ` +
+      `style="width:210px;padding:7px;font-size:13px">` +
+      `<label class="badge${p.enabled ? ' ok' : ''}" style="display:flex;align-items:center;gap:6px;cursor:pointer">` +
+      `<input type="checkbox" id="ae_${i}" ${p.enabled ? 'checked' : ''}> Sin aprobación</label>` +
+      `<button class="ghost sm" onclick="saveAuto(${i})">Guardar</button></div></div>`;
+  }).join('');
+}
+function renderAudit() {
+  const box = document.getElementById('audit');
+  const lines = (__lastAuditLines || []).slice().reverse();
+  if (!lines.length) { box.innerHTML = 'Sin eventos.'; return; }
+  if (__auditRaw) {
+    box.innerHTML = lines.map(l => `<div>${esc(l)}</div>`).join('');
+    return;
+  }
+  box.innerHTML = lines.map(l => {
+    try {
+      const o = JSON.parse(l);
+      const dt = o.ts ? new Date(o.ts * 1000).toLocaleString() : '—';
+      const ev = o.ev || 'ev';
+      const dec = o.decision || o.action || '';
+      let bcls = '';
+      if (dec === 'allow' || dec === 'replace' || dec === 'password-created') bcls = 'ok';
+      else if (dec === 'deny' || dec.includes('mismatch') || dec === 'refused') bcls = 'bad';
+      else if (dec) bcls = 'warn';
+      const details = [];
+      if (o.alias) details.push(`alias=${o.alias}`);
+      if (o.origin) details.push(`origin=${o.origin}`);
+      if (o.approval) details.push(`approval=${o.approval}`);
+      if (o.before !== undefined && o.after !== undefined) details.push(`${o.before}→${o.after} entries`);
+      if (o.sha256) details.push(`sha256=${o.sha256}`);
+      return `<div class="audit-row"><span style="color:var(--mut);min-width:145px">${esc(dt)}</span>` +
+        `<span class="badge">${esc(ev)}</span>` +
+        (dec ? `<span class="badge ${bcls}">${esc(dec)}</span>` : '') +
+        `<span style="color:var(--txt)">${esc(details.join(' · '))}</span></div>`;
+    } catch (e) {
+      return `<div class="audit-row">${esc(l)}</div>`;
+    }
+  }).join('');
+}
+function toggleAuditRaw() {
+  __auditRaw = !__auditRaw;
+  document.getElementById('auditmodebtn').textContent = __auditRaw ? 'Ver vista estructurada' : 'Ver JSON crudo';
+  renderAudit();
 }
 async function load() {
   const r = await api('/api/aliases');
@@ -354,32 +530,30 @@ async function load() {
   ds.className = 'badge ' + (b.locked ? 'bad' : 'ok');
   const items = b.items || [];
   window.__aliases = items.map(x => x.alias);
+  const kb = b.db_size ? (b.db_size / 1024).toFixed(1) + ' KB' : '0 KB';
+  const baks = (b.backups !== undefined) ? `${b.backups} backups` : '';
+  document.getElementById('dbmeta').textContent = `💾 ${kb}` + (baks ? ` · ${baks}` : '');
   const af = await api('/api/autofill');
   const amap = {};
   ((af.body && af.body.items) || []).forEach(x => { amap[x.alias] = x; });
   document.getElementById('count').textContent = items.length + ' aliases';
-  document.getElementById('aliases').innerHTML = items.length
-    ? items.map((it, i) => {
-        const p = amap[it.alias] || {enabled: false, origin: '', suggested_origin: ''};
-        const val = p.enabled ? (p.origin || '') : (p.suggested_origin || '');
-        return `<div class="alias"><div><b>${esc(it.alias)}</b><br><small>${esc(it.hint)}</small></div>` +
-          `<div class="row" style="gap:6px">` +
-          `<input id="ao_${i}" value="${esc(val)}" placeholder="https://sitio" ` +
-          `style="width:210px;padding:7px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt);font-size:13px">` +
-          `<label class="badge${p.enabled ? ' ok' : ''}" style="display:flex;align-items:center;gap:6px;cursor:pointer">` +
-          `<input type="checkbox" id="ae_${i}" ${p.enabled ? 'checked' : ''}> Sin aprobación</label>` +
-          `<button class="ghost" onclick="saveAuto(${i})">Guardar</button></div></div>`;
-      }).join('')
-    : '<div class="sub">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
-  const a = await api('/api/audit?limit=8');
-  document.getElementById('audit').innerHTML = (a.body.lines || []).slice().reverse()
-    .map(l => `<div>${esc(l)}</div>`).join('') || 'Sin eventos.';
-  document.getElementById('obstate').textContent = '⚪ un solo uso (no se puede consultar sin consumirlo)';
+  __aliasRows = items.map((it, i) => ({
+    idx: i,
+    alias: it.alias,
+    group: it.group || '',
+    hint: it.hint || '',
+    policy: amap[it.alias] || {enabled: false, origin: '', suggested_origin: ''}
+  }));
+  renderAliases();
+  const a = await api('/api/audit?limit=12');
+  __lastAuditLines = a.body.lines || [];
+  renderAudit();
+  document.getElementById('obstate').textContent = '⚪ disponible (un solo uso)';
   try {
     const ob = await api('/api/onboarding/state');
     const served = !!(ob.body && ob.body.served);
     if (served) { killOb(); }
-    const n = (b.items || []).length;
+    const n = items.length;
     document.getElementById('checklist').innerHTML =
       '✅ Contraseña creada (estás dentro)<br>' +
       (n ? `✅ .kdbx con ${n} alias` : '⬜ .kdbx vacío — súbelo con tus copias') + '<br>' +
@@ -407,7 +581,10 @@ async function saveAuto(i) {
 }
 const drop = document.getElementById('drop'), fi = document.getElementById('f');
 drop.onclick = () => fi.click();
-fi.onchange = () => drop.firstChild.textContent = 'Elegido: ' + (fi.files[0] ? fi.files[0].name : 'nada');
+fi.onchange = () => {
+  const f = fi.files[0];
+  drop.firstChild.textContent = f ? `Elegido: ${f.name} (${(f.size / 1024).toFixed(1)} KB) ` : 'Nada elegido ';
+};
 ['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.add('over');}));
 ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {ev.preventDefault(); drop.classList.remove('over');}));
 drop.addEventListener('drop', ev => { fi.files = ev.dataTransfer.files; fi.onchange(); });
@@ -427,9 +604,20 @@ async function up() {
   if (!f) return alert('Elige primero el .kdbx (clic o arrastra)');
   if (!confirm('Reemplazar el operativo con ' + f.name + ' (' + f.size + ' bytes)? Se guarda backup.')) return;
   const fd = new FormData(); fd.append('db', f, 'hermes.kdbx');
-  document.getElementById('out').textContent = 'Subiendo…';
+  const out = document.getElementById('out');
+  out.textContent = 'Subiendo y verificando con keyfile del host…';
   const r = await fetch('/api/upload', {method: 'POST', headers: authHeaders(), body: fd});
-  document.getElementById('out').textContent = r.status + ' ' + await r.text();
+  const txt = await r.text();
+  try {
+    const j = JSON.parse(txt);
+    if (r.ok && j.success) {
+      out.textContent = `✅ Reemplazo atómico exitoso (HTTP ${r.status}) · Entradas antes: ${j.before} → ahora: ${j.after} · Backup rotado guardado.`;
+    } else {
+      out.textContent = `❌ Rechazado (HTTP ${r.status}): ${j.error || txt}`;
+    }
+  } catch (e) {
+    out.textContent = r.status + ' ' + txt;
+  }
   load();
 }
 async function onboard() {
@@ -459,9 +647,11 @@ boot();
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "keygate-sync/0.1"
+    server_version = "keygate-sync/0.2"
     _hits: dict = {}
+    _auth_fails: dict = {}
     _hits_lock = threading.Lock()  # ThreadingHTTPServer: dict ops race without it
+    _keyfile_lock = threading.Lock()
 
     def log_message(self, *a):
         pass  # never log request details (may carry metadata)
@@ -473,6 +663,45 @@ class Handler(BaseHTTPRequestHandler):
     def _home(self):
         return Path.home() / ".hermes"
 
+    def _content_length(self) -> int:
+        try:
+            return int(self.headers.get("Content-Length") or 0)
+        except (ValueError, TypeError):
+            return -1
+
+    def _send_sec_headers(self, no_store: bool = True) -> None:
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'self'",
+        )
+        if no_store:
+            self.send_header("Cache-Control", "no-store, max-age=0")
+
+    def _csrf_ok(self, want_json: bool = True) -> bool:
+        """Block cross-origin browser POSTs (Drive-By CSRF protection)."""
+        sfs = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if sfs and sfs not in ("same-origin", "none"):
+            self._send(403, {"success": False, "error": "cross-origin request blocked (CSRF)"})
+            return False
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin:
+            host = (self.headers.get("Host") or "").strip().lower()
+            orig_host = (urlparse(origin).netloc or "").strip().lower()
+            if origin.lower() == "null" or not orig_host or (host and orig_host != host):
+                self._send(403, {"success": False, "error": "cross-origin request blocked (CSRF)"})
+                return False
+        if want_json:
+            ctype = (self.headers.get("Content-Type") or "").strip().lower()
+            if "application/json" not in ctype:
+                self._send(415, {"success": False, "error": "Content-Type application/json required"})
+                return False
+        return True
+
     def _authed(self) -> bool:
         given = self.headers.get("Authorization", "")
         if not given.startswith("Bearer "):
@@ -483,22 +712,50 @@ class Handler(BaseHTTPRequestHandler):
         ip = self.client_address[0]
         now = time.time()
         with self._hits_lock:
+            # Purge stale IPs periodically so _hits cannot grow unbounded
+            if len(self._hits) > 64:
+                for k in list(self._hits.keys()):
+                    kept = [t for t in self._hits[k] if now - t < RATE_WINDOW]
+                    if kept:
+                        self._hits[k] = kept
+                    else:
+                        del self._hits[k]
             arr = [t for t in self._hits.get(ip, []) if now - t < RATE_WINDOW]
             arr.append(now)
             self._hits[ip] = arr
             n = len(arr)
         return n <= RATE_MAX
 
+    def _auth_rate_ok(self) -> bool:
+        ip = self.client_address[0]
+        now = time.time()
+        with self._hits_lock:
+            arr = [t for t in self._auth_fails.get(ip, []) if now - t < RATE_WINDOW]
+            if arr:
+                self._auth_fails[ip] = arr
+            elif ip in self._auth_fails:
+                del self._auth_fails[ip]
+            return len(arr) < AUTH_FAIL_MAX
+
+    def _record_auth_fail(self) -> None:
+        ip = self.client_address[0]
+        now = time.time()
+        with self._hits_lock:
+            arr = [t for t in self._auth_fails.get(ip, []) if now - t < RATE_WINDOW]
+            arr.append(now)
+            self._auth_fails[ip] = arr
+
     def _send(self, code: int, obj) -> None:
         body = json.dumps(obj).encode()
         self.send_response(code)
+        self._send_sec_headers(no_store=True)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
     def _need_auth(self) -> bool:
-        if not self._rate_ok():
+        if not self._rate_ok() or not self._auth_rate_ok():
             self._send(429, {"success": False, "error": "rate limited"})
             return False
         if not password_is_set(self._home()):
@@ -506,11 +763,23 @@ class Handler(BaseHTTPRequestHandler):
                              "setup_required": True})
             return False
         if not self._authed():
+            self._record_auth_fail()
             self._send(401, {"success": False, "error": "wrong password"})
             return False
         return True
 
     # -- routes --
+    def do_HEAD(self):
+        if not self._rate_ok():
+            self.send_response(429)
+            self._send_sec_headers(no_store=True)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self._send_sec_headers(no_store=True)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+
     def do_GET(self):
         db, kf, _token, _b, _p, _k = self._cfg()
         url = urlparse(self.path)
@@ -523,6 +792,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             body = INDEX_HTML.encode()
             self.send_response(200)
+            self._send_sec_headers(no_store=True)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -554,10 +824,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"success": False, "locked": True, "items": []})
                 return
             items = [{"alias": e.split("/")[-1],
+                      "group": e.rsplit("/", 1)[0] if "/" in e else "",
                       "hint": kg.hint_for(e.split("/")[-1], "")}
                      for e in kg.list_entries(db, kf)][:200]
+            db_p = Path(db)
+            try:
+                st = db_p.stat()
+                db_size, db_mtime = st.st_size, int(st.st_mtime)
+            except Exception:
+                db_size, db_mtime = 0, 0
+            try:
+                backups = len(list(db_p.parent.glob(db_p.name + ".*.bak")))
+            except Exception:
+                backups = 0
             self._send(200, {"success": True, "locked": False,
-                             "count": len(items), "items": items})
+                             "count": len(items), "items": items,
+                             "db_size": db_size, "db_mtime": db_mtime,
+                             "backups": backups})
             return
         if url.path == "/api/onboarding/state":
             # Non-consuming probe: tells the UI whether the one-time keyfile
@@ -567,29 +850,41 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/onboarding/keyfile":
             flag = Path(db).parent / ".keygate-keyfile-served"
-            if flag.exists():
-                self._send(410, {"success": False, "error": "already served (one-time)"})
-                return
-            try:
-                data = Path(kf).read_bytes()
-            except Exception:
-                self._send(500, {"success": False, "error": "keyfile unreadable"})
-                return
-            # Flag is set ONLY after the bytes leave the socket: a dropped
-            # connection must not burn the single shot.
-            try:
-                self.send_response(200)
-                self.send_header("Content-Type", "application/octet-stream")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-            except (BrokenPipeError, ConnectionResetError):
-                return  # no flag: user may retry the one-time download
-            flag.write_text(f"{int(time.time())}\n")
-            try:
-                os.chmod(flag, 0o600)
-            except Exception:
-                pass
+            with self._keyfile_lock:
+                if flag.exists():
+                    self._send(410, {"success": False, "error": "already served (one-time)"})
+                    return
+                try:
+                    data = Path(kf).read_bytes()
+                except Exception:
+                    self._send(500, {"success": False, "error": "keyfile unreadable"})
+                    return
+                try:
+                    flag.parent.mkdir(parents=True, exist_ok=True)
+                    fd = os.open(str(flag), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(fd, "w") as f:
+                        f.write(f"{int(time.time())}\n")
+                except FileExistsError:
+                    self._send(410, {"success": False, "error": "already served (one-time)"})
+                    return
+                except Exception:
+                    self._send(500, {"success": False, "error": "could not mark keyfile state"})
+                    return
+                # Roll back the flag if the socket drops mid-transfer so a
+                # broken connection does not burn the one-time download.
+                try:
+                    self.send_response(200)
+                    self._send_sec_headers(no_store=True)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError):
+                    try:
+                        flag.unlink()
+                    except Exception:
+                        pass
+                    return
             audit_ev(self._home(), {"ev": "sync", "action": "keyfile-served-once"})
             return
         if url.path == "/api/download":
@@ -604,6 +899,7 @@ class Handler(BaseHTTPRequestHandler):
             audit_ev(self._home(), {"ev": "sync", "action": "db-downloaded",
                                     "bytes": len(data)})
             self.send_response(200)
+            self._send_sec_headers(no_store=True)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Disposition",
                              'attachment; filename="hermes.kdbx"')
@@ -665,7 +961,9 @@ class Handler(BaseHTTPRequestHandler):
             if not self._rate_ok():
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
-            length = int(self.headers.get("Content-Length") or 0)
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
             if length <= 0 or length > 1024:
                 self._send(400, {"success": False, "error": "bad request size"})
                 return
@@ -697,7 +995,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/reset-password":
             # Change the web password. Requires the CURRENT one (proves
             # possession; no weaker than logging in). Min 12. Audited.
-            length = int(self.headers.get("Content-Length") or 0)
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
             if length <= 0 or length > 1024:
                 self._send(400, {"success": False, "error": "bad request size"})
                 return
@@ -709,6 +1009,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"success": False, "error": "bad json"})
                 return
             if not check_password(self._home(), current):
+                self._record_auth_fail()
                 self._send(401, {"success": False, "error": "current password wrong"})
                 return
             if len(new) < PW_MIN_LEN:
@@ -733,9 +1034,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/autofill":
             # Toggle a per-alias auto-fill policy. Requires the web session
-            # (Bearer) plus an origin that matches the vault entry's URL host:
+            # (Bearer) plus an origin that matches the vault entry's exact origin:
             # the policy can never widen what the phishing guard already allows.
-            length = int(self.headers.get("Content-Length") or 0)
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
             if length <= 0 or length > 4096:
                 self._send(400, {"success": False, "error": "bad request size"})
                 return
@@ -754,45 +1057,52 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"success": False, "locked": True,
                                  "error": "operative DB locked"})
                 return
-            entry = next((e for e in kg.list_entries(db, kf)
-                          if e.split("/")[-1] == alias), None)
+            entry, resolve_err = kg.resolve_entry(db, kf, alias)
             if not entry:
-                self._send(404, {"success": False,
-                                 "error": "alias not found in operative vault"})
+                self._send(404 if "not found" in (resolve_err or "") else 400,
+                           {"success": False,
+                            "error": resolve_err or "alias not found in operative vault"})
                 return
+            leaf_alias = entry.split("/")[-1]
             if enabled:
                 norm = kg.normalize_origin(origin)
                 if not norm:
                     self._send(400, {"success": False,
-                                     "error": "origin must be http(s)://host"})
+                                     "error": "origin must be a valid http(s)://host"})
                     return
                 try:
                     vault_url = kg.show_field(db, kf, entry, "url") or ""
                 except Exception:
                     vault_url = ""
                 vnorm = kg.normalize_origin(vault_url)
-                if vnorm:
-                    if urlparse(norm).hostname != urlparse(vnorm).hostname:
-                        self._send(400, {"success": False,
-                                         "error": ("origin host does not match the "
-                                                   "vault entry URL")})
-                        return
-                kg.set_autofill(self._home(), alias, norm, True)
+                if not vnorm:
+                    self._send(400, {"success": False,
+                                     "error": ("vault entry has no valid URL — set the exact "
+                                               "URL in KeePassXC before enabling auto-fill")})
+                    return
+                if norm != vnorm:
+                    self._send(400, {"success": False,
+                                     "error": (f"origin ({norm}) does not match the "
+                                               f"vault entry origin ({vnorm})")})
+                    return
+                kg.set_autofill(self._home(), leaf_alias, norm, True)
                 audit_ev(self._home(), {"ev": "sync", "action": "autofill-policy",
-                                        "alias": kg.redact_label(alias),
+                                        "alias": kg.redact_label(leaf_alias),
                                         "origin": kg.redact_origin(norm),
                                         "enabled": True})
-                self._send(200, {"success": True, "alias": alias,
+                self._send(200, {"success": True, "alias": leaf_alias,
                                  "enabled": True, "origin": norm})
             else:
-                kg.set_autofill(self._home(), alias, origin, False)
+                kg.set_autofill(self._home(), leaf_alias, origin, False)
                 audit_ev(self._home(), {"ev": "sync", "action": "autofill-policy",
-                                        "alias": kg.redact_label(alias),
+                                        "alias": kg.redact_label(leaf_alias),
                                         "origin": kg.redact_origin(origin),
                                         "enabled": False})
-                self._send(200, {"success": True, "alias": alias, "enabled": False})
+                self._send(200, {"success": True, "alias": leaf_alias, "enabled": False})
             return
-        length = int(self.headers.get("Content-Length") or 0)
+        if not self._csrf_ok(want_json=False):
+            return
+        length = self._content_length()
         if length <= 0 or length > MAX_UPLOAD + 65536:
             self._send(400, {"success": False, "error": "bad upload size"})
             return
@@ -856,8 +1166,9 @@ class Handler(BaseHTTPRequestHandler):
         # keepassxc-cli reads any path; staging validated by magic + open test
         try:
             p = subprocess.run(
-                ["keepassxc-cli", "ls", "-R", "-k", kf, "--no-password", "-q", staging],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+                [kg._kxc(), "ls", "-R", "-k", kf, "--no-password", "-q", "--", staging],
+                env=kg._child_env(), stdin=subprocess.DEVNULL,
+                capture_output=True, text=True, timeout=30)
             if p.returncode != 0:
                 return -1
             import re

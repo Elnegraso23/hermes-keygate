@@ -422,8 +422,21 @@ def register(ctx):
         - NEVER create a browser session from a probe (cloud backends bill
           session creation). Existing supervisors only.
         """
+        want = kg.normalize_origin(origin)
+        if not want:
+            return {"success": False, "error_type": "domain_mismatch",
+                    "error": "origin must be a valid http(s)://host URL — refused BEFORE approval"}
+        entry_url = kg.show_field(db, kf, entry, "url") or ""
+        bound = kg.normalize_origin(entry_url)
+        if not bound:
+            return {"success": False, "error_type": "domain_mismatch",
+                    "error": ("entry has no valid URL in KeePass — set the exact login URL "
+                              "in KeePassXC first. No approval was spent.")}
+        if want != bound:
+            return {"success": False, "error_type": "domain_mismatch",
+                    "error": (f"vault URL ({bound}) != requested origin ({want}) — refused "
+                              "BEFORE approval (phishing guard). No approval was spent.")}
         try:
-            from agent.vault_store import normalize_origin
             from tools.browser_vault_tool import _current_page_origin
             from tools.browser_supervisor import SUPERVISOR_REGISTRY
         except Exception:
@@ -460,15 +473,6 @@ def register(ctx):
             if page:
                 live_origin = page
                 break
-        try:
-            want = normalize_origin(origin)
-        except Exception:
-            want = origin
-        try:
-            entry_url = kg.show_field(db, kf, entry, "url") or ""
-            bound = normalize_origin(entry_url) if entry_url else want
-        except Exception:
-            bound = want
         if not live_origin:
             return {"success": False, "error_type": "page_not_ready",
                     "error": ("no live supervised browser tab found — open the login "
@@ -478,12 +482,13 @@ def register(ctx):
         pl = str(live_origin).lower()
         if pl in ("", "about:blank") or pl.startswith(("chrome://", "about:", "edge://", "brave://")):
             return {"success": False, "error_type": "page_not_ready", "page": live_origin,
-                    "error": (f"live tab is on {live_origin!r}, not a login page — navigate to {want} "
+                    "error": (f"live tab is on {live_origin!r}, not a login page — navigate to {bound} "
                               "and retry. No approval was spent."),
                     "hint": "navigate + snapshot first, fill second"}
-        if want and want.lower() not in pl and pl not in want.lower():
+        live_norm = kg.normalize_origin(live_origin)
+        if not live_norm or live_norm != bound:
             return {"success": False, "error_type": "domain_mismatch", "page": live_origin,
-                    "error": (f"live tab is on {live_origin!r}, fill asks for {want} — refused "
+                    "error": (f"live tab is on {live_origin!r}, fill is bound to {bound} — refused "
                               "BEFORE approval (phishing guard). No approval was spent.")}
         return None
 
@@ -500,10 +505,10 @@ def register(ctx):
                                "error": "operative DB locked — unlock hermes.kdbx locally"})
 
         # 0) Pre-flight BEFORE any prompt: tab must already be bound.
-        entries = kg.list_entries(db, kf)
-        match = next((e for e in entries if e.split("/")[-1] == alias), None)
+        match, resolve_err = kg.resolve_entry(db, kf, alias)
         if not match:
-            return json.dumps({"success": False, "error": "alias not found in operative vault"})
+            return json.dumps({"success": False,
+                               "error": resolve_err or "alias not found in operative vault"})
         pre = _preflight_tab(kw.get("task_id") or params.get("task_id") or "default",
                              origin, db, kf, match)
         if pre is not None:
@@ -526,7 +531,8 @@ def register(ctx):
             return json.dumps({"success": False, "error_type": "unattended",
                                "error": ("this session cannot prompt (cron/one-shot): "
                                          "run from an interactive CLI/Desktop/Telegram session")})
-        auto = kg.autofill_allows(_home(), match.split("/")[-1], origin)
+        leaf_alias = match.split("/")[-1]
+        auto = kg.autofill_allows(_home(), leaf_alias, origin)
         approval_evidence = {}
         if auto:
             approval_evidence = {"approval": "auto-policy"}
@@ -534,7 +540,7 @@ def register(ctx):
             try:
                 from tools.approval_prompt import request_elicitation_consent
                 decision = request_elicitation_consent(
-                    f"Fill login {kg.redact_label(alias)} on {kg.redact_origin(origin)}?",
+                    f"Fill login {kg.redact_label(leaf_alias)} on {kg.redact_origin(origin)}?",
                     ("Hermes wants KeePass to enter this site's username and password "
                      "into the page (TOTP too when the entry has a seed). Secrets never "
                      "enter the chat, logs or memory — only this prompt. One-time use: "
@@ -544,7 +550,7 @@ def register(ctx):
                 return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
             approval_evidence = {"approval": str(decision)}
             if decision != "accept":
-                kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(alias),
+                kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(leaf_alias),
                                    "origin": kg.redact_origin(origin), "decision": "deny",
                                    **approval_evidence})
                 return json.dumps({"success": False, "error": "user denied (explicit approval required)",
@@ -558,7 +564,7 @@ def register(ctx):
         # Username also fills server-side so the full identifier never enters
         # the conversation (strict redaction).
         filled = _native_keygate_fill(kw.get("task_id") or params.get("task_id") or "default",
-                                      alias, origin, db, kf)
+                                      match, origin, db, kf)
         audit_rec = {"ev": "fill", "alias": kg.redact_label(alias),
                      "origin": kg.redact_origin(origin),
                      "decision": "allow" if filled.get("success") else filled.get("error_type", "refused"),
@@ -717,14 +723,15 @@ def register(ctx):
             return json.dumps({"success": False, "error": "alias required"})
         cfg = _plug_cfg()
         db, kf = kg.cfg_paths(cfg)
-        entries = kg.list_entries(db, kf)
-        match = next((e for e in entries if e.split("/")[-1] == alias), None)
+        match, resolve_err = kg.resolve_entry(db, kf, alias)
         if not match:
-            return json.dumps({"success": False, "error": "alias not found in operative vault"})
+            return json.dumps({"success": False,
+                               "error": resolve_err or "alias not found in operative vault"})
+        leaf_alias = match.split("/")[-1]
         try:
             from tools.approval_prompt import request_elicitation_consent
             decision = request_elicitation_consent(
-                f"Import login {kg.redact_label(alias)} into Hermes vault?",
+                f"Import login {kg.redact_label(leaf_alias)} into Hermes vault?",
                 ("ONE-TIME copy of the username+password into the encrypted local vault "
                  "(label keygate:<alias>) so site logins fill natively. Source stays KeePass; "
                  "delete the copy any time via Hermes vault settings. Secrets never enter chat."),
@@ -732,7 +739,7 @@ def register(ctx):
         except Exception as exc:
             return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
         if decision != "accept":
-            kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(alias),
+            kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(leaf_alias),
                                "decision": "deny"})
             return json.dumps({"success": False, "error": "user denied (explicit approval required)"})
         username = kg.show_field(db, kf, match, "username") or ""
@@ -742,6 +749,8 @@ def register(ctx):
             return json.dumps({"success": False,
                                "error": "entry needs username+password+URL in KeePass"})
         otp_seed = _totp_seed(db, kf, match)
+        pw_b = bytearray(password.encode("utf-8"))
+        otp_b = bytearray((otp_seed or "").encode("utf-8"))
         secret = {"identifier_type": ("email" if "@" in username else "username"),
                   "identifier": username, "password": password}
         if otp_seed:
@@ -749,7 +758,7 @@ def register(ctx):
         try:
             from agent.vault_store import get_vault_store, normalize_origin
             store = get_vault_store()
-            label = f"keygate:{alias}"
+            label = f"keygate:{leaf_alias}"
             for meta in store.list_items():
                 if meta.label == label:
                     store.remove_item(meta.id)
@@ -757,18 +766,26 @@ def register(ctx):
                                   origin=normalize_origin(entry_url))
         except Exception as exc:
             from agent.vault_store import scrub_secret_from_text
+            scrub_map = {"password": password}
+            if otp_seed:
+                scrub_map["otp_secret"] = otp_seed
             return json.dumps({"success": False,
                                "error": scrub_secret_from_text(f"import failed: {exc}",
-                                                               {"password": password})[:200]})
+                                                               scrub_map)[:200]})
         finally:
-            kg.zeroize(bytearray(password.encode()))
+            kg.zeroize(pw_b)
+            kg.zeroize(otp_b)
+            secret["password"] = ""
+            if "otp_secret" in secret:
+                secret["otp_secret"] = ""
             password = ""
-        kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(alias),
+            otp_seed = None
+        kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(leaf_alias),
                            "decision": "allow", "handle": meta.id,
-                           "has_otp": bool(otp_seed)})
+                           "has_otp": bool(len(otp_b))})
         return json.dumps({"success": True, "imported": True, "label": label,
                            "handle": meta.id, "origin": meta.origin,
-                           "has_otp": bool(otp_seed),
+                           "has_otp": bool(len(otp_b)),
                            "next": "browser_vault_fill with this handle, then submit"})
 
     ctx.register_tool(
@@ -788,26 +805,28 @@ def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
     """Best-effort TOTP seed extraction for import. Empty when the entry has
     no seed or the CLI does not expose it (codes still work via show -t)."""
     import re as _re
-    import subprocess as _sp
     try:
-        p = _sp.run(["keepassxc-cli", "show", "-k", kf, "--no-password", "-q",
-                     "--all", "--", db, entry],
-                    stdin=_sp.DEVNULL, capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=30)
+        p = kg._run_kxc(["show", "-k", kf, "--no-password", "-q",
+                         "--all", "--", db, entry])
     except Exception:
         return None
     if p.returncode != 0:
         return None
     out = p.stdout or ""
-    m = _re.search(r"otpauth://totp/[^\s'\"]+", out)
-    if m:
-        sm = _re.search(r"[?&]secret=([A-Z2-7=]+)", m.group(0), _re.IGNORECASE)
-        if sm:
-            return sm.group(1).upper()
-    m = _re.search(r"(?im)^\s*(?:TOTP\s*)?(?:Seed|Secret)\s*:\s*([A-Z2-7=\s]+)\s*$", out)
-    if m:
-        return _re.sub(r"\s+", "", m.group(1)).upper()
-    return None
+    raw_b = bytearray(out.encode("utf-8"))
+    try:
+        m = _re.search(r"otpauth://totp/[^\s'\"]+", out)
+        if m:
+            sm = _re.search(r"[?&]secret=([A-Z2-7=]+)", m.group(0), _re.IGNORECASE)
+            if sm:
+                return sm.group(1).upper()
+        m = _re.search(r"(?im)^\s*(?:TOTP\s*)?(?:Seed|Secret)\s*:\s*([A-Z2-7=\s]+)\s*$", out)
+        if m:
+            return _re.sub(r"\s+", "", m.group(1)).upper()
+        return None
+    finally:
+        kg.zeroize(raw_b)
+        out = ""
 
 
 def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str) -> dict:
@@ -867,16 +886,24 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
 
     task_id = _resolve_effective_task(task_id)
 
-    entry_url = kg.show_field(db, kf, alias, "url") or ""
-    try:
-        bound = normalize_origin(entry_url) if entry_url else ""
-    except Exception:
-        bound = ""
-    if bound and origin.lower() not in bound.lower() and bound.lower() not in origin.lower():
+    entry = alias
+    if "/" not in entry:
+        resolved, _err = kg.resolve_entry(db, kf, entry)
+        if resolved:
+            entry = resolved
+
+    entry_url = kg.show_field(db, kf, entry, "url") or ""
+    want = kg.normalize_origin(origin)
+    bound = kg.normalize_origin(entry_url)
+    if not bound:
+        return {"success": False, "filled_fields": 0, "origin": origin,
+                "error_type": "domain_mismatch",
+                "error": "entry has no valid URL in KeePass — refused"}
+    if not want or want != bound:
         return {"success": False, "filled_fields": 0, "origin": origin,
                 "error_type": "domain_mismatch",
                 "error": "vault URL != requested origin — refused"}
-    allowed = [bound] if bound else [origin]
+    allowed = [bound]
 
     page_origin = None
     for candidate in allowed:
@@ -894,13 +921,14 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
         return {"success": False, "filled_fields": 0, "origin": origin,
                 "error": ("no page open in the agent browser — navigate with browser_navigate "
                           "(not the Desktop preview panel) to the login page first, then retry")}
-    if page_origin not in allowed:
+    page_norm = kg.normalize_origin(page_origin)
+    if not page_norm or page_norm not in allowed:
         return {"success": False, "filled_fields": 0, "origin": origin,
                 "error_type": "origin_mismatch",
                 "error": f"page {page_origin!r} != bound {', '.join(allowed)} — refused"}
 
-    username = kg.show_field(db, kf, alias, "username") or ""
-    pw_raw = kg.show_field(db, kf, alias, "password") or ""
+    username = kg.show_field(db, kf, entry, "username") or ""
+    pw_raw = kg.show_field(db, kf, entry, "password") or ""
     if not pw_raw:
         return {"success": False, "filled_fields": 0, "origin": page_origin,
                 "error": "no password for alias"}
@@ -959,7 +987,7 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
         filled = int(parsed.get("filled", 0)) if isinstance(parsed, dict) else 0
 
         totp_filled = False
-        otp_code = kg.show_field(db, kf, alias, "totp")
+        otp_code = kg.show_field(db, kf, entry, "totp")
         if otp_code and filled:
             otp_controls = classify_otp_controls(
                 [LoginControl.from_dict(r) for r in raw if isinstance(r, dict)])

@@ -166,9 +166,20 @@ else
   bad "login card" "falta logincard o sigue prompt() nativo"
 fi
 
-# --- 9. reset-password: exige la actual, min 12, invalida la vieja ---
+# --- 9. reset-password + CSRF guard + security headers ---
 # (el endpoint exige Bearer ADEMÁS del campo current: los curls llevan auth)
 PW1="clave-inicial-larga-1"; PW2="clave-nueva-larga-22"
+hdrs=$(curl -sI -m 10 "$B/")
+if echo "$hdrs" | grep -qi "X-Frame-Options: DENY" && echo "$hdrs" | grep -qi "Content-Security-Policy:"; then
+  ok "cabeceras HTTP de seguridad (X-Frame-Options + CSP)"
+else
+  bad "cabeceras HTTP" "$hdrs"
+fi
+csrf_code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/set-password" \
+  -H 'Origin: https://evil.example' -H 'Content-Type: application/json' \
+  -d "{\"password\":\"$PW1\"}")
+[ "$csrf_code" = "403" ] && ok "CSRF cross-origin bloqueado en set-password (403)" \
+  || bad "CSRF set-password" "esperaba 403, obtuvo $csrf_code"
 r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
 echo "$r" | grep -q '"success": true' && ok "set-password inicial" || bad "set-password" "$r"
 code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
@@ -191,6 +202,22 @@ code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $P
 
 # --- 10. upload round-trip: acepta válido, rehúsa vacío, rotación exacta ---
 H="Authorization: Bearer $PW2"
+# --- 9b. autofill policy (H9): acepta origen exacto, rehúsa rebaja http o dominio ajeno ---
+af_bad=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/autofill" \
+  -H "$H" -H 'Content-Type: application/json' \
+  -d '{"alias":"t-alias","origin":"http://example.com","enabled":true}')
+[ "$af_bad" = "400" ] && ok "autofill rehúsa rebaja https->http (400)" \
+  || bad "autofill scheme downgrade" "esperaba 400, obtuvo $af_bad"
+af_evil=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/autofill" \
+  -H "$H" -H 'Content-Type: application/json' \
+  -d '{"alias":"t-alias","origin":"https://example.com.evil.com","enabled":true}')
+[ "$af_evil" = "400" ] && ok "autofill rehúsa subdominio/sufijo phishing (400)" \
+  || bad "autofill phishing" "esperaba 400, obtuvo $af_evil"
+af_ok=$(curl -s -m 10 -X POST "$B/api/autofill" \
+  -H "$H" -H 'Content-Type: application/json' \
+  -d '{"alias":"t-alias","origin":"https://example.com","enabled":true}')
+echo "$af_ok" | grep -q '"enabled": true' && ok "autofill acepta origen exacto del vault" \
+  || bad "autofill válido" "$af_ok"
 DDB="$TMP/up.kdbx"
 cp "$SDB" "$DDB"
 # 5 backups viejos JUNTO AL DB DEL SERVER + upload = deben quedar exactamente 5 (fórmula sin +1)

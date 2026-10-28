@@ -1,4 +1,4 @@
 name: keygate
-version: "0.6.0"
+version: "0.6.1"
 description: "Blind KeePassXC injector for Hermes: redacted metadata, per-item or per-alias (web-toggled) approval, server-side CDP fill. Hermes never sees passwords."
 api_version: 1

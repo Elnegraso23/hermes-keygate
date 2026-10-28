@@ -25,7 +25,7 @@ done
 # argumentos): si responde con su usage en vez de "Unknown command", existe.
 if command -v keepassxc-cli >/dev/null 2>&1; then
   kx_out=$(keepassxc-cli db-create --help 2>&1)
-  if echo "$kx_out" | grep -qE "db-create|Usage: keepassxc-cli db-create"; then
+  if echo "$kx_out" | grep -qE "db-create|--set-key-file"; then
     say "ok: keepassxc-cli trae db-create"
   else
     say "FALTA: keepassxc-cli sin db-create (necesitas >= 2.7; $(keepassxc-cli --version 2>&1 | head -n1))"

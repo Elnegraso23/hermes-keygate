@@ -68,11 +68,15 @@ if git -C "$REPO" diff --name-only "$BEFORE" "$AFTER" | grep -qE '\.(kdbx|key)$'
   exit 3
 fi
 mkdir -p "$DEST"
-for f in __init__.py keygate_lib.py plugin.yaml skills/keygate-default/SKILL.md skills/keygate-install/SKILL.md; do
+for f in __init__.py keygate_lib.py plugin.yaml sync/keygate_sync.py skills/keygate-default/SKILL.md skills/keygate-install/SKILL.md; do
   [ -f "$REPO/$f" ] || { echo "falta $f en repo, abortando (instalación intacta)" >&2; exit 2; }
 done
-python3 -c "import ast; [ast.parse(open('$REPO/'+f).read()) for f in ['__init__.py','keygate_lib.py']]" \
-  || { echo "sintaxis rota en update, abortando" >&2; exit 2; }
+python3 - "$REPO" <<'PY' || { echo "sintaxis rota en update, abortando" >&2; exit 2; }
+import ast, pathlib, sys
+repo = pathlib.Path(sys.argv[1])
+for rel in ("__init__.py", "keygate_lib.py", "sync/keygate_sync.py"):
+    ast.parse((repo / rel).read_text(encoding="utf-8"))
+PY
 cp "$REPO/__init__.py" "$REPO/keygate_lib.py" "$REPO/plugin.yaml" "$DEST/"
 # Los skills son instrucciones que el agente lee: sin ellos el plugin queda
 # mudo (register() no los encuentra). Se reinstalan siempre, completos.
@@ -80,5 +84,9 @@ rm -rf "$DEST/skills"
 cp -r "$REPO/skills" "$DEST/skills"
 find "$DEST/skills" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 git -C "$REPO" rev-parse HEAD > "$DEST/.installed_commit"
+if command -v systemctl >/dev/null 2>&1 \
+   && systemctl --user is-active --quiet keygate-sync.service 2>/dev/null; then
+  systemctl --user restart keygate-sync.service 2>/dev/null || true
+fi
 echo "instalado en $DEST. Rige en tu próxima sesión de hermes (reinicia el chat)."
 echo "seguimiento: reporta en https://github.com/Elnegraso23/hermes-keygate/issues"

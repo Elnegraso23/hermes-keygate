@@ -47,7 +47,8 @@ CANARY = "KGCANARY-" + secrets.token_hex(16)
 
 REAL_HOME = os.path.expanduser("~")  # ANTES de cambiar HOME
 HERMES_AGENT = os.path.join(REAL_HOME, ".hermes/hermes-agent")
-PLUGIN_INIT = os.path.join(REAL_HOME, ".hermes/plugins/keygate/__init__.py")
+PLUGIN_INIT = (str(REPO / "__init__.py") if (REPO / "__init__.py").is_file()
+               else os.path.join(REAL_HOME, ".hermes/plugins/keygate/__init__.py"))
 tmp = Path(tempfile.mkdtemp(prefix="kgleak-"))
 os.environ["HOME"] = str(tmp)  # audit del plugin cae aquí, no en tu ~/.hermes
 TDB = str(tmp / "leak.kdbx")
@@ -101,6 +102,8 @@ outs = {
     "import-denied(headless)": T["keygate_import"]({"alias": "canary-alias-1"}),
     "fill-not-ready(headless)": T["keygate_request_fill"](
         {"alias": "canary-alias-1", "origin": "https://example.com"}),
+    "fill-phishing-suffix": T["keygate_request_fill"](
+        {"alias": "canary-alias-1", "origin": "https://example.com.evil.com"}),
     "alias-add-bloqueado": T["keygate_alias_add"]({}),
 }
 print("== superficies que vería el modelo ==")
@@ -134,10 +137,15 @@ time.sleep(2)
 try:
     pw = "clave-temporal-larga-1"
     def api(path, data=None, auth=True):
+        hdrs = {}
+        if auth:
+            hdrs["Authorization"] = f"Bearer {pw}"
+        if data is not None:
+            hdrs["Content-Type"] = "application/json"
         req = urllib.request.Request(
             f"http://127.0.0.1:8479{path}",
             data=json.dumps(data).encode() if data is not None else None,
-            headers={"Authorization": f"Bearer {pw}"} if auth else {})
+            headers=hdrs)
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
                 return r.status, r.read()

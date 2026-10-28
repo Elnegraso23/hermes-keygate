@@ -18,6 +18,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -72,7 +74,9 @@ def redact_origin(origin: str) -> str:
     return head[0] + "*" * (len(head) - 1) + "." + tail
 
 
-def hint_for(label: str, user: str) -> str:
+def hint_for(label: str, user: str = "") -> str:
+    if not (user or "").strip():
+        return redact_label(label)
     return f"{redact_label(label)} ({redact_user(user)})"
 
 
@@ -152,7 +156,7 @@ def db_locked(db: str, keyfile: str) -> bool:
     """Probe with `ls` (fast, non-interactive). Exit != 0 with keyfile-only
     DB almost always means locked/missing, never prompt (stdin is DEVNULL)."""
     try:
-        p = _run_kxc(["ls", "-k", keyfile, "--no-password", "-q", db])
+        p = _run_kxc(["ls", "-k", keyfile, "--no-password", "-q", "--", db])
     except Exception:
         return True
     return p.returncode != 0
@@ -160,7 +164,7 @@ def db_locked(db: str, keyfile: str) -> bool:
 
 def list_entries(db: str, keyfile: str) -> List[str]:
     """Entry paths (titles/groups), metadata only. Empty when locked."""
-    p = _run_kxc(["ls", "-R", "-k", keyfile, "--no-password", "-q", db])
+    p = _run_kxc(["ls", "-R", "-k", keyfile, "--no-password", "-q", "--", db])
     if p.returncode != 0:
         return []
     out = []
@@ -185,16 +189,37 @@ def list_entries(db: str, keyfile: str) -> List[str]:
     return out
 
 
+def resolve_entry(db: str, keyfile: str, alias: str) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve an alias (or group/alias path) to its exact KeePassXC entry path.
+
+    Returns (entry_path, error_message). Rejects ambiguous leaf names across
+    multiple groups so a fill/import never picks the wrong group silently.
+    """
+    target = (alias or "").strip().strip("/")
+    if not target:
+        return None, "alias required"
+    entries = list_entries(db, keyfile)
+    if target in entries:
+        return target, None
+    matches = [e for e in entries if e.split("/")[-1] == target]
+    if not matches:
+        return None, "alias not found in operative vault"
+    if len(matches) > 1:
+        return None, (f"ambiguous alias {redact_label(target)!r} found in {len(matches)} "
+                      "groups — use unique aliases or specify group/alias")
+    return matches[0], None
+
+
 def show_field(db: str, keyfile: str, entry: str, field: str) -> Optional[str]:
     """Resolve ONE field server-side. field in {password, username, totp, url}."""
     if field == "totp":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-t", "-s", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-t", "-s", "--", db, entry]
     elif field == "password":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-s", "-a", "Password", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-s", "-a", "Password", "--", db, entry]
     elif field == "username":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "UserName", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "UserName", "--", db, entry]
     elif field == "url":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "URL", db, entry]
+        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "URL", "--", db, entry]
     else:
         return None
     try:
@@ -260,7 +285,7 @@ def session_ensure(domain: str, ttl_seconds: int = 4 * 3600) -> dict:
     try:
         cur = json.loads(fp.read_text(encoding="utf-8"))
         if int(cur.get("expires_at", 0)) > now:
-            return {"handle": cur["handle"], "valid": True,
+            return {"handle": cur["handle"], "valid": True, "created": False,
                     "expires_at": cur["expires_at"]}
     except Exception:
         pass
@@ -272,7 +297,8 @@ def session_ensure(domain: str, ttl_seconds: int = 4 * 3600) -> dict:
         os.chmod(fp, 0o600)
     except Exception:
         pass
-    return {"handle": handle, "valid": False, "expires_at": rec["expires_at"]}
+    return {"handle": handle, "valid": True, "created": True,
+            "expires_at": rec["expires_at"]}
 
 
 def session_invalidate(domain: str) -> bool:
@@ -286,7 +312,16 @@ def session_invalidate(domain: str) -> bool:
 
 # ---------------------------------------------------------------- autofill policies ---
 
+_AUTOFILL_LOCK = threading.Lock()
+
+
 def normalize_origin(origin: Optional[str]) -> str:
+    """Canonical scheme://host[:port] for http/https URLs.
+
+    Rejects userinfo (https://good.com@evil.com), non-http(s) schemes,
+    missing hosts, or malformed ports. Strips default ports (:80 for http,
+    :443 for https) and trailing dots so exact string comparison is safe.
+    """
     s = (origin or "").strip()
     if not s:
         return ""
@@ -295,12 +330,28 @@ def normalize_origin(origin: Optional[str]) -> str:
         scheme = (parsed.scheme or "").lower()
         if scheme not in ("http", "https"):
             return ""
-        netloc = (parsed.netloc or "").lower()
-        if not netloc:
+        if parsed.username is not None or parsed.password is not None or "@" in (parsed.netloc or ""):
             return ""
-        return f"{scheme}://{netloc}"
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host or any(c.isspace() for c in host):
+            return ""
+        try:
+            port = parsed.port
+        except ValueError:
+            return ""
+        host_fmt = f"[{host}]" if ":" in host else host
+        if port is not None and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+            return f"{scheme}://{host_fmt}:{port}"
+        return f"{scheme}://{host_fmt}"
     except Exception:
         return ""
+
+
+def origins_match(a: Optional[str], b: Optional[str]) -> bool:
+    """Strict equality of canonical http(s) origins (never substring match)."""
+    na = normalize_origin(a)
+    nb = normalize_origin(b)
+    return bool(na and nb and na == nb)
 
 
 def autofill_path(home: Path | str) -> Path:
@@ -323,30 +374,44 @@ def load_autofill(home: Path | str) -> dict:
 def save_autofill(home: Path | str, data: dict) -> None:
     fp = autofill_path(home)
     fp.parent.mkdir(parents=True, exist_ok=True)
-    tmp = fp.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, fp)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=str(fp.parent),
+            prefix=".keygate-autofill-", suffix=".tmp", delete=False
+        ) as tf:
+            tmp_name = tf.name
+            json.dump(data, tf, ensure_ascii=False, indent=2)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, fp)
+    except Exception:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink()
+            except Exception:
+                pass
+        raise
 
 
 def set_autofill(home: Path | str, alias: str, origin: str, enabled: bool) -> None:
-    data = load_autofill(home)
-    if not enabled:
-        if "policies" in data and alias in data["policies"]:
-            del data["policies"][alias]
-    else:
-        norm = normalize_origin(origin)
-        if not norm:
-            return
-        if "policies" not in data:
-            data["policies"] = {}
-        data["policies"][alias] = {
-            "origin": norm,
-            "enabled": True,
-            "created": int(time.time()),
-            "source": "web"
-        }
-    save_autofill(home, data)
+    with _AUTOFILL_LOCK:
+        data = load_autofill(home)
+        if not enabled:
+            if "policies" in data and alias in data["policies"]:
+                del data["policies"][alias]
+        else:
+            norm = normalize_origin(origin)
+            if not norm:
+                return
+            if "policies" not in data:
+                data["policies"] = {}
+            data["policies"][alias] = {
+                "origin": norm,
+                "enabled": True,
+                "created": int(time.time()),
+                "source": "web"
+            }
+        save_autofill(home, data)
 
 
 def autofill_allows(home: Path | str, alias: str, origin: str) -> bool:
