@@ -180,6 +180,17 @@ csrf_code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/set-pas
   -d "{\"password\":\"$PW1\"}")
 [ "$csrf_code" = "403" ] && ok "CSRF cross-origin bloqueado en set-password (403)" \
   || bad "CSRF set-password" "esperaba 403, obtuvo $csrf_code"
+
+# --- 9b. H12: Host allowlist (DNS rebinding) ---
+evil_code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H 'Host: evil.example' "$B/")
+[ "$evil_code" = "403" ] && ok "H12: Host ajeno rechazado (403)" \
+  || bad "H12 Host ajeno" "esperaba 403, obtuvo $evil_code"
+no_host=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H 'Host:' "$B/")
+[ "$no_host" = "403" ] && ok "H12: request sin Host rechazado (403)" \
+  || bad "H12 sin Host" "esperaba 403, obtuvo $no_host"
+good_code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$B/")
+[ "$good_code" = "200" ] && ok "H12: Host legítimo aceptado" \
+  || bad "H12 Host legítimo" "esperaba 200, obtuvo $good_code"
 r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
 echo "$r" | grep -q '"success": true' && ok "set-password inicial" || bad "set-password" "$r"
 code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \

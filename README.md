@@ -370,6 +370,17 @@ Luego el prompt de uso diario con `alias internet-agent-1` y
 `origin https://the-internet.herokuapp.com`. Éxito =
 `You logged into a secure area!` + audit `allow` + `approval: accept`.
 
+## Defensas de sesión (H11–H12)
+
+- **El relleno es atómico y solo en el top-level.** La guardia de origen y la de
+  `window.top === window.self` viajan dentro del mismo `Runtime.evaluate` que
+  escribe en el DOM, así que una redirección tardía o un iframe cross-origin no
+  pueden colarse entre la comprobación y el relleno. Errores:
+  `frame_not_top_level`, `origin_changed_toctou`.
+- **Host allowlist contra DNS rebinding.** El servidor web acepta únicamente el
+  `Host` de su IP de bind (y `localhost`/`127.0.0.1` cuando escucha en loopback);
+  cualquier otro `Host` recibe 403 antes de tocar una ruta.
+
 ## Dependencia: keepassxc-cli (endurecida, H10)
 
 keygate **no** implementa criptografía propia ni incluye binarios: usa el

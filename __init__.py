@@ -978,8 +978,20 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
         register_vault_redaction_value(secret["password"])
         if username:
             register_vault_redaction_value(username)
+        # Re-verificación barata antes de evaluar; la garantía atómica está
+        # dentro del propio JS (misma evaluación que escribe).
         try:
-            fr = _eval_js_secret(task_id, build_fill_js(fills, expected_origin=page_origin, nonce=nonce))
+            _now_origin = kg.normalize_origin(_current_page_origin(task_id) or "")
+        except Exception:
+            _now_origin = ""
+        if _now_origin != bound:
+            return {"success": False, "filled_fields": 0, "origin": page_origin,
+                    "error_type": "origin_changed_toctou",
+                    "error": "page origin changed before fill — nothing written"}
+        try:
+            fr = _eval_js_secret(task_id, kg.harden_fill_js(
+                build_fill_js(fills, expected_origin=page_origin, nonce=nonce),
+                page_origin))
         except Exception as exc:
             return {"success": False, "filled_fields": 0, "origin": page_origin,
                     "error": scrub_secret_from_text(str(exc), secret)}
@@ -989,10 +1001,15 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
         parsed = _parse_json_result(fr.get("result"))
         if isinstance(parsed, str):
             parsed = _parse_json_result(parsed)
-        if isinstance(parsed, dict) and parsed.get("refused") == "origin_changed":
+        if isinstance(parsed, dict) and parsed.get("refused"):
+            _reason = str(parsed.get("refused"))
+            _et = ("frame_not_top_level" if _reason == "frame_not_top_level"
+                   else "origin_changed_toctou")
+            _msg = ("focus is inside a cross-origin iframe — refused"
+                    if _et == "frame_not_top_level"
+                    else "page navigated away before fill — nothing written")
             return {"success": False, "filled_fields": 0, "origin": page_origin,
-                    "error_type": "origin_changed",
-                    "error": "page navigated away before fill — nothing written"}
+                    "error_type": _et, "error": _msg}
         filled = int(parsed.get("filled", 0)) if isinstance(parsed, dict) else 0
 
         totp_filled = False
@@ -1004,8 +1021,9 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
             if otp_fills:
                 register_vault_redaction_value(otp_code)
                 try:
-                    or_ = _eval_js_secret(task_id, build_fill_js(otp_fills, expected_origin=page_origin,
-                                                                 nonce=nonce))
+                    or_ = _eval_js_secret(task_id, kg.harden_fill_js(
+                        build_fill_js(otp_fills, expected_origin=page_origin, nonce=nonce),
+                        page_origin))
                     op = _parse_json_result(or_.get("result"))
                     if isinstance(op, str):
                         op = _parse_json_result(op)

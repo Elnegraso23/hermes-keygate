@@ -55,6 +55,11 @@ MAX_UPLOAD = 10 * 1024 * 1024
 RATE_MAX = 60  # requests per window per IP
 RATE_WINDOW = 60.0
 AUTH_FAIL_MAX = 8  # wrong-password attempts per window per IP
+
+# Host allowlist, built at startup from the bind address. Defeats DNS
+# rebinding: a page on evil.com that resolves to 127.0.0.1 still sends
+# "Host: evil.com", which is not in the list -> 403 before any routing.
+_ALLOWED_HOSTS = set()
 PW_MIN_LEN = 12
 PW_ITERS = 210_000
 
@@ -650,6 +655,25 @@ boot();
 """
 
 
+def _build_allowed_hosts(bind: str, port: int) -> set:
+    """Exact Host header values accepted by this instance (bind IP only)."""
+    hosts = set()
+
+    def add(h: str) -> None:
+        h = (h or "").strip().lower()
+        if not h:
+            return
+        hosts.add(h)
+        if port not in (80, 443):
+            hosts.add(f"{h}:{port}")
+
+    add(bind)
+    if bind in ("127.0.0.1", "::1", "localhost"):
+        for h in ("127.0.0.1", "localhost", "[::1]"):
+            add(h)
+    return hosts
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "keygate-sync/0.2"
     _hits: dict = {}
@@ -672,6 +696,11 @@ class Handler(BaseHTTPRequestHandler):
             return int(self.headers.get("Content-Length") or 0)
         except (ValueError, TypeError):
             return -1
+
+    def _host_ok(self) -> bool:
+        """Strict Host check (DNS-rebinding defense). Never echoes the input."""
+        raw = (self.headers.get("Host") or "").strip().lower()
+        return bool(raw) and raw in _ALLOWED_HOSTS
 
     def _send_sec_headers(self, no_store: bool = True) -> None:
         self.send_header("X-Frame-Options", "DENY")
@@ -774,6 +803,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- routes --
     def do_HEAD(self):
+        if not self._host_ok():
+            self.send_response(403)
+            self._send_sec_headers(no_store=True)
+            self.end_headers()
+            return
         if not self._rate_ok():
             self.send_response(429)
             self._send_sec_headers(no_store=True)
@@ -785,6 +819,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        if not self._host_ok():
+            self._send(403, {"success": False, "error": "forbidden"})
+            return
         db, kf, _token, _b, _p, _k = self._cfg()
         url = urlparse(self.path)
         if url.path == "/":
@@ -957,6 +994,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"success": False, "error": "not found"})
 
     def do_POST(self):
+        if not self._host_ok():
+            self._send(403, {"success": False, "error": "forbidden"})
+            return
         db, kf, _token, _b, _p, keep = self._cfg()
         url = urlparse(self.path)
         if url.path == "/api/set-password":
@@ -1215,6 +1255,8 @@ def main() -> int:
     except Exception:
         pass
     # bind ya validado arriba: 0.0.0.0 se rechaza antes de llegar aquí.
+    global _ALLOWED_HOSTS
+    _ALLOWED_HOSTS = _build_allowed_hosts(bind, port)
     srv = ThreadingHTTPServer((bind, port), Handler)  # nosec B104
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
     print("Auth por contraseña (PBKDF2, solo en tu navegador por pestaña). Jamás por chat (queda en historial).")

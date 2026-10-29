@@ -4,6 +4,17 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.4 — 2026-10-28
+- **H11 — TOCTOU e iframes cerrados en el fill**: el JS de relleno se envuelve en
+  una guardia atómica que corre en la MISMA evaluación que escribe en el DOM:
+  `window.top !== window.self` aborta con `frame_not_top_level`, y un
+  `location.origin` distinto del aprobado aborta con `origin_changed_toctou`.
+  Se añade además una re-verificación de origen inmediatamente antes del eval.
+- **H12 — anti DNS rebinding**: allowlist estricta de `Host` construida al
+  arrancar desde la IP de bind (más `127.0.0.1`/`localhost`/`[::1]` cuando
+  aplica). Host ausente o ajeno → 403 sin reflejar el valor.
+- Tests: `tests/test_fill_js.py` (3 casos) y 3 casos nuevos en el selftest → 38.
+
 ## 0.6.3 — 2026-10-28
 - **H10 — resolución endurecida de `keepassxc-cli`**: orden determinista
   (`KEYGATE_KXC_BIN` → rutas canónicas → `PATH`), *fail-closed* si el binario

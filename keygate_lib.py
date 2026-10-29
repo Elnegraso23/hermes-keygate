@@ -441,6 +441,29 @@ def audit(home: Path, event: dict) -> None:
         pass
 
 
+def harden_fill_js(js: str, expected_origin: str) -> str:
+    """Wrap a fill expression with an atomic top-level-frame + origin guard.
+
+    The guard executes inside the SAME Runtime.evaluate call as the DOM writes,
+    so a navigation (meta refresh, JS redirect, late 302) cannot slip between
+    the check and the mutation. `window.top !== window.self` blocks acting on
+    a cross-origin iframe. Aborts return a JSON string with `refused` set and
+    never touch the DOM.
+    """
+    exp = json.dumps(expected_origin)
+    return (
+        "(() => {\n"
+        "  if (window.top !== window.self) {\n"
+        "    return JSON.stringify({ refused: \"frame_not_top_level\" });\n"
+        "  }\n"
+        f"  if (window.location.origin !== {exp}) {{\n"
+        "    return JSON.stringify({ refused: \"origin_changed_toctou\", found: window.location.origin });\n"
+        "  }\n"
+        f"  return ({js});\n"
+        "})()"
+    )
+
+
 # ---------------------------------------------------------------- sessions (tmpfs TTL) ---
 
 
