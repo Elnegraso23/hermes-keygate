@@ -496,3 +496,10 @@ a paid service without a separate commercial license.
 This is not an OSI license (it restricts commercial use). The code remains
 public, auditable and self-hosted. Versions published up to v0.6.1 under MIT
 stay MIT for whoever already downloaded them; this change applies going forward.
+
+## Contributing
+
+Found a bug or want to send a patch? Read **[CONTRIBUTING.md](CONTRIBUTING.md)**
+(Spanish; PRs in English are welcome too). Security issues go through
+**[SECURITY.md](SECURITY.md)**, not a public issue. Signed commits are welcome but
+not required.

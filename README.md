@@ -39,6 +39,7 @@ en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
 - [Estructura del repo](#estructura-del-repo)
 - [FAQ](#faq)
 - [Licencia](#licencia)
+- [Contribuir](#contribuir)
 - [Límites honestos](#límites-honestos)
 
 ## Cómo funciona (diseño en 30 segundos)
@@ -548,3 +549,10 @@ No es una licencia OSI (restringe el uso comercial), así que algunos portales y
 empresas la clasifican distinto de MIT o Apache. El código sigue siendo público,
 auditable y self-hosted. Las versiones publicadas hasta la v0.6.1 bajo MIT
 permanecen MIT para quien ya las descargó; este cambio aplica hacia adelante.
+
+## Contribuir
+
+¿Encontraste un bug o quieres aportar algo? Lee **[CONTRIBUTING.md](CONTRIBUTING.md)**:
+ahí están las pruebas que hay que correr, qué revisa el CI y qué datos incluir en
+un reporte. Para fallos de seguridad, usa **[SECURITY.md](SECURITY.md)** y no un
+issue público. No hace falta firmar los commits para contribuir.
