@@ -58,21 +58,63 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    env:
+      # Versiones fijas: la clave de caché las incluye, así un upgrade
+      # invalida el cache solo (evidencia reproducible para la auditoría).
+      BANDIT_VERSION: "1.9.4"
+      SEMGREP_VERSION: "1.182.1"
+      GITLEAKS_VERSION: "8.30.1"
+      SEMGREP_SEND_METRICS: "off"
+      SEMGREP_ENABLE_VERSION_CHECK: "0"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Instalar escaneres
-        run: pip install -q bandit semgrep
+
+      # Cache del venv ya instalado + binario de gitleaks + reglas de semgrep.
+      # En cache-hit no se instala nada: solo se ejecutan los escáneres.
+      - name: Cache security tools
+        id: tools-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/kg-ci/venv
+            ~/.cache/kg-ci/bin
+            ~/.cache/semgrep
+          key: sec-tools-${{ runner.os }}-py311-bandit${{ env.BANDIT_VERSION }}-semgrep${{ env.SEMGREP_VERSION }}-gitleaks${{ env.GITLEAKS_VERSION }}
+
+      - name: Install security tools (cache miss only)
+        if: steps.tools-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 -m venv "$HOME/.cache/kg-ci/venv"
+          "$HOME/.cache/kg-ci/venv/bin/pip" install -q --upgrade pip
+          "$HOME/.cache/kg-ci/venv/bin/pip" install -q \
+            "bandit==${BANDIT_VERSION}" "semgrep==${SEMGREP_VERSION}"
+          mkdir -p "$HOME/.cache/kg-ci/bin"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$HOME/.cache/kg-ci/bin" gitleaks
+
+      - name: Verify security tools
+        run: |
+          set -euo pipefail
+          "$HOME/.cache/kg-ci/venv/bin/bandit" --version
+          "$HOME/.cache/kg-ci/venv/bin/semgrep" --version
+          "$HOME/.cache/kg-ci/bin/gitleaks" version
+
       - name: Seguridad - Bandit (falla en medium/high)
-        run: bandit -q -ll -r . -x ./tests,./.git,./__pycache__
+        run: |
+          "$HOME/.cache/kg-ci/venv/bin/bandit" -q -ll -r . -x ./tests,./.git,./__pycache__
+
       - name: Seguridad - Semgrep (solo errores)
-        run: semgrep scan --config p/python --config p/secrets --severity ERROR --error --quiet .
+        run: |
+          "$HOME/.cache/kg-ci/venv/bin/semgrep" scan --config p/python --config p/secrets --severity ERROR --error --quiet .
+
       - name: Seguridad - Gitleaks
         run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --redact --config .gitleaks.toml --exit-code 1
+          "$HOME/.cache/kg-ci/bin/gitleaks" detect --source . --redact --config .gitleaks.toml --exit-code 1
           echo "gitleaks: sin fugas"
