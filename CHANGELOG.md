@@ -4,6 +4,15 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.6 — 2026-10-29
+
+- **Licencia**: MIT → **PolyForm Noncommercial 1.0.0** (uso libre no comercial;
+  uso comercial requiere licencia aparte). Ver `LICENSE` y la sección *Licencia*.
+- **Cadena de custodia**: commits y tags firmados con SSH (ed25519), llave de
+  firma registrada en GitHub; release con checksum SHA-256 del código fuente.
+- README: se corrige la afirmación "100% open source" → *source-available*, y el
+  badge de versión queda sincronizado con `plugin.yaml`.
+
 ## 0.6.5 — 2026-10-28
 - **H13 — normalize_origin endurecido**: canonicalización IDNA por etiqueta
   (`https://аpple.com` → `https://xn--pple-43d.com`), rechazo de caracteres de

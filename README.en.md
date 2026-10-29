@@ -1,6 +1,6 @@
 # 🔑 hermes-keygate — secure KeePassXC logins for Hermes Agent
 [Español](README.md) · **English**
-[![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md) [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE) [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.en.md) [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py) [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
+[![Version](https://img.shields.io/badge/version-0.6.6-orange.svg)](CHANGELOG.md) [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE) [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.en.md) [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py) [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
 
 > **⚠️ ALPHA (v0.6.1) — fresh software, with known flaws.**
 > Works on real machines but changes fast and sometimes breaks

@@ -1,7 +1,7 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.6-orange.svg)](CHANGELOG.md)
 [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
