@@ -1,5 +1,10 @@
 # Contribuir a hermes-keygate
 
+> **Estado: contribuciones cerradas por ahora.** No se aceptan pull requests.
+> Los PRs que lleguen se cierran automáticamente con un mensaje. Sí se aceptan
+> **issues** (bugs, riesgos) y **Discussions** (ideas, preguntas). Si traes un
+> parche, pégalo como diff dentro del issue y se revisa ahí.
+
 Gracias por querer aportar. Este proyecto es alfa y pequeño: un issue bien escrito
 vale tanto como un PR.
 
@@ -21,7 +26,9 @@ Abre un issue con la plantilla de bug. Incluye:
 Si el fallo es de seguridad (fuga de credenciales, bypass de aprobación, ejecución
 no autorizada), **no abras un issue público**: sigue `SECURITY.md`.
 
-## Mandar cambios
+## Si quieres proponer un parche
+
+Estas pruebas son las que hay que pasar antes de pegar un diff en un issue:
 
 1. Haz fork y trabaja en una rama descriptiva (`fix/fill-timeout`, `feat/…`).
 2. Mantén el cambio acotado: un PR = un problema. Los PR gigantes no se revisan.

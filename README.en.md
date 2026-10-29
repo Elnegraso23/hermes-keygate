@@ -499,7 +499,7 @@ stay MIT for whoever already downloaded them; this change applies going forward.
 
 ## Contributing
 
-Found a bug or want to send a patch? Read **[CONTRIBUTING.md](CONTRIBUTING.md)**
+Found a bug or want to send a patch? Note: **pull requests are closed for now** — use issues or Discussions. Read **[CONTRIBUTING.md](CONTRIBUTING.md)**
 (Spanish; PRs in English are welcome too). Security issues go through
 **[SECURITY.md](SECURITY.md)**, not a public issue. Signed commits are welcome but
 not required.

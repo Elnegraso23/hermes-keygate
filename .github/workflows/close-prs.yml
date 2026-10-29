@@ -1,0 +1,45 @@
+name: Cerrar PRs (contribuciones cerradas)
+
+# El repo no acepta pull requests por ahora: los PRs se cierran con un mensaje
+# que redirige a issues/discussions. No se hace checkout de código del PR.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  cerrar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const cuerpo = [
+              'Gracias por el interés en hermes-keygate 🙏',
+              '',
+              'Por ahora **no se aceptan pull requests**. Si encontraste un bug,',
+              'un riesgo de seguridad o quieres proponer una mejora, abre un **issue**',
+              '(o un tema en **Discussions** si es una idea o pregunta):',
+              '',
+              '- Bug: plantilla de issue → https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/issues/new/choose',
+              '- Seguridad: NO abras issue público, sigue SECURITY.md',
+              '',
+              'Si tu PR trae un parche concreto, pégalo como diff en el issue y se revisa ahí.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: cuerpo,
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed',
+            });
