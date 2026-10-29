@@ -346,6 +346,38 @@ Then the daily use prompt with `alias internet-agent-1` and
 `origin https://the-internet.herokuapp.com`. Expected result =
 `You logged into a secure area!` + audit `allow` + `approval: accept`.
 
+## Dependency: keepassxc-cli (hardened, H10)
+
+keygate does **not** implement its own crypto and ships no binaries: it uses the
+system `keepassxc-cli` as the **cryptographic boundary**, so you inherit your
+distro's security patches instead of hand-rolled AES/Argon2.
+
+Since 0.6.3 the binary is resolved deterministically and validated **before**
+execution:
+
+1. `KEYGATE_KXC_BIN` (absolute path). If set and invalid/insecure it fails
+   closed and does **not** fall back to another binary.
+2. Canonical paths: `/usr/bin`, `/usr/local/bin`, `/snap/bin`,
+   `/Applications/KeePassXC.app/Contents/MacOS`, `/opt/homebrew/bin`.
+3. `PATH`.
+
+Checks: regular executable file, **not group/world-writable**, owned by `root`
+or your uid, and parent directory not group/world-writable (`/tmp` only with the
+sticky bit and only when both the binary and the directory are yours).
+
+```bash
+scripts/keygate-doctor      # or: python3 keygate_lib.py --doctor
+```
+
+Returns `kxc_found`, `kxc_path`, `kxc_source` (`env:KEYGATE_KXC_BIN` |
+`system_path` | `missing`), `kxc_permissions_ok`, `kxc_version`,
+`kxc_version_ok` (minimum 2.7.0) and an `install_hint` for your distro.
+The same block is included in `keygate_doctor`.
+
+**Flatpak:** the `org.keepassxc.KeePassXC` export is the GUI, not the CLI. Wrap
+`flatpak run --command=keepassxc-cli org.keepassxc.KeePassXC` and point
+`KEYGATE_KXC_BIN` at that wrapper.
+
 ## Update and tracking
 
 ```bash

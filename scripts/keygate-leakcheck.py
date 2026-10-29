@@ -147,17 +147,21 @@ try:
             data=json.dumps(data).encode() if data is not None else None,
             headers=hdrs)
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310 - servidor local de prueba
+            # Servidor local del propio test: URL fija, sin entrada externa.
+            with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310
                 return r.status, r.read()
         except Exception as e:
-            body = e.read() if hasattr(e, "read") else b""
+            reader = getattr(e, "read", None)
+            raw = reader() if callable(reader) else b""
+            body: bytes = bytes(raw) if isinstance(raw, (bytes, bytearray)) else b""
             return getattr(e, "code", 0), body
     api("/api/set-password", {"password": pw}, auth=False)
     H = {"Authorization": f"Bearer {pw}"}
     _, aliases = api("/api/aliases")
     _, waudit = api("/api/audit?limit=50")
     req = urllib.request.Request("http://127.0.0.1:8479/api/download", headers=H)
-    with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310 - servidor local de prueba
+    # Servidor local del propio test: URL fija, sin entrada externa.
+    with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310
         blob = r.read()
     check("web-aliases", {"json": aliases.decode()})
     check("web-audit", {"json": waudit.decode()})

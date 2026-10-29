@@ -1193,7 +1193,8 @@ def main() -> int:
     if os.environ.get("KEYGATE_SYNC_TOKEN"):
         print("aviso: KEYGATE_SYNC_TOKEN ya no se usa (auth ahora por contraseña creada en primera visita).",
               file=sys.stderr)
-    if bind == "0.0.0.0":  # nosec B104 - es la comprobación que lo rechaza
+    # Esta es justamente la comprobación que rechaza 0.0.0.0.
+    if bind == "0.0.0.0":  # nosec B104
         print("REFUSED: no bindees 0.0.0.0 — usa 127.0.0.1 o tu IP Tailscale.", file=sys.stderr)
         return 2
     if not Path(db).exists():
@@ -1213,7 +1214,8 @@ def main() -> int:
             pass
     except Exception:
         pass
-    srv = ThreadingHTTPServer((bind, port), Handler)  # nosec B104 - bind validado arriba: 0.0.0.0 se rechaza
+    # bind ya validado arriba: 0.0.0.0 se rechaza antes de llegar aquí.
+    srv = ThreadingHTTPServer((bind, port), Handler)  # nosec B104
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
     print("Auth por contraseña (PBKDF2, solo en tu navegador por pestaña). Jamás por chat (queda en historial).")
     try:

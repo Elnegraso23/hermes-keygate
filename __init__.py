@@ -224,7 +224,8 @@ def _remote_version(home) -> dict:
         import urllib.request as _u
         req = _u.Request(REMOTE_VERSION_URL,
                          headers={"User-Agent": "hermes-keygate/version-check"})
-        with _u.urlopen(req, timeout=VERSION_CHECK_TIMEOUT) as r:  # nosec B310 - URL constante https, sin entrada de usuario
+        # URL constante https, sin entrada del usuario: no hay SSRF posible.
+        with _u.urlopen(req, timeout=VERSION_CHECK_TIMEOUT) as r:  # nosec B310
             body = r.read(4096).decode("utf-8", errors="replace")
         for line in body.splitlines():
             if line.strip().startswith("version:"):
@@ -645,7 +646,7 @@ def register(ctx):
                "db": {"locked": locked,
                       "entries": 0 if locked else len(kg.list_entries(db, kf))},
                "channel": _channel_diag(), "browser": _browser_transport(),
-               "audit_tail": []}
+               "keepassxc": kg.doctor_check(), "audit_tail": []}
         try:
             lines = (_home() / "keygate-audit.jsonl").read_text().splitlines()[-3:]
             out["audit_tail"] = lines
@@ -659,7 +660,8 @@ def register(ctx):
         schema={"name": "keygate_doctor",
                 "description": ("Diagnose this host without secrets: plugin version/update, "
                                 "operative DB locked + entry count, approval channel reachability "
-                                "(platform, gateway notify), last redacted audit lines. Paste the "
+                                "(platform, gateway notify), keepassxc-cli resolution/version/"
+                                "permission checks, last redacted audit lines. Paste the "
                                 "result when reporting problems."),
                 "parameters": {"type": "object", "properties": {}, "required": []}},
         handler=h_doctor)

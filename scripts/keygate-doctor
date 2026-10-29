@@ -1,0 +1,7 @@
+#!/bin/bash
+# keygate-doctor — estado de la dependencia keepassxc-cli.
+# No abre el vault ni toca secretos: solo resuelve el binario, valida
+# permisos/propietario y reporta la versión.
+set -uo pipefail
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 "$REPO/keygate_lib.py" --doctor

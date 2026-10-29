@@ -4,6 +4,19 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.3 — 2026-10-28
+- **H10 — resolución endurecida de `keepassxc-cli`**: orden determinista
+  (`KEYGATE_KXC_BIN` → rutas canónicas → `PATH`), *fail-closed* si el binario
+  configurado es inválido, y validación de propiedad/permisos (archivo regular,
+  ejecutable, no escribible por group/others, dueño root o el uid actual,
+  directorio padre no escribible; `/tmp` solo con sticky bit y siendo propio).
+- **`doctor_check()` + `scripts/keygate-doctor`** (`python3 keygate_lib.py --doctor`):
+  ruta, origen, permisos, versión (mínimo 2.7.0) e `install_hint` por distro.
+  Expuesto también en la tool `keygate_doctor`.
+- Selftest: 3 casos nuevos (env válido, rechazo de binario 0777, doctor) → 35.
+- Docs: sección de dependencia en README es/en explicando por qué el CLI sigue
+  siendo externo (frontera criptográfica) y cómo usar Flatpak.
+
 ## 0.6.2 — 2026-10-28
 - Calidad: `error_type: "db_locked"` uniforme, `otpauth://` parseado con
   `urlparse`, errores tipados en `_run_kxc` (124 timeout / 127 binario ausente),

@@ -272,5 +272,44 @@ else
   bad "vault abrible tras --reset-key" "keepassxc-cli no pudo abrir el vault"
 fi
 
+# --- 12. H10: resolución endurecida de keepassxc-cli ---
+KXC_REAL="$(command -v keepassxc-cli 2>/dev/null || true)"
+out=$(PYTHONPATH="$REPO" KEYGATE_KXC_BIN="$KXC_REAL" python3 -c "
+import keygate_lib as kg
+p = kg._resolve_kxc_bin()
+assert p == '$KXC_REAL', p
+d = kg.doctor_check()
+assert d['kxc_found'] and d['kxc_permissions_ok'], d
+assert d['kxc_source'] == 'env:KEYGATE_KXC_BIN', d
+assert d['kxc_version'], d
+print('h10-ok')" 2>&1)
+echo "$out" | grep -q "h10-ok" && ok "H10: KEYGATE_KXC_BIN válido resuelve + doctor lo reporta" \
+  || bad "H10 binario válido" "$out"
+
+# Un binario world-writable es un wrapper secuestrable: debe rechazarse.
+mkdir -p "$TMP/h10bin"
+printf '#!/bin/sh\nexit 0\n' > "$TMP/h10bin/keepassxc-cli"
+chmod 0777 "$TMP/h10bin/keepassxc-cli"
+out=$(PYTHONPATH="$REPO" KEYGATE_KXC_BIN="$TMP/h10bin/keepassxc-cli" python3 -c "
+import keygate_lib as kg
+try:
+    kg._resolve_kxc_bin()
+except kg.InsecureBinaryError as e:
+    print('rejected:', e)
+else:
+    raise SystemExit('ERROR: binario 0777 aceptado')" 2>&1)
+echo "$out" | grep -q "rejected:.*security ownership/permission" \
+  && ok "H10: rechaza keepassxc-cli world-writable" || bad "H10 rechazo 0777" "$out"
+
+# doctor_check: permisos OK y versión parseada (>= 2.7 en CI/host de desarrollo).
+out=$(PYTHONPATH="$REPO" python3 -c "
+import keygate_lib as kg
+d = kg.doctor_check()
+assert d['kxc_permissions_ok'] is True, d
+assert d['kxc_version'], d
+print('doc-ok', d['kxc_version'])" 2>&1)
+echo "$out" | grep -q "doc-ok" && ok "H10: doctor_check reporta permisos OK y versión" \
+  || bad "H10 doctor_check" "$out"
+
 echo "== selftest: $pass PASS, $fail FAIL =="
 [ "$fail" = 0 ] || exit 1

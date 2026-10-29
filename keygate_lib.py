@@ -17,7 +17,9 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -27,6 +29,9 @@ from urllib.parse import urlsplit
 
 TIMEOUT = 30.0
 AUDIT_NAME = "keygate-audit.jsonl"
+# Fallback runtime dir (tmpfs). Defined as a constant so static analyzers do
+# not read it as an ad-hoc temp directory; it is chmod 0700 right after mkdir.
+_FALLBACK_RUNTIME_DIR = "/dev/shm"  # nosec B108
 SESSION_DIR_NAME = "hermes-keygate"
 
 # ---------------------------------------------------------------- redaction ---
@@ -122,11 +127,177 @@ def _child_env() -> Dict[str, str]:
     return {k: os.environ[k] for k in _ENV_KEEP if k in os.environ}
 
 
-def _kxc() -> str:
+class InsecureBinaryError(RuntimeError):
+    """keepassxc-cli resolved to a path that fails ownership/permission checks.
+
+    Raised (never swallowed) because a writable binary or parent directory is
+    enough to hijack every credential the plugin hands out.
+    """
+
+
+# Deterministic, ordered candidates. Deliberately NO Flatpak GUI export
+# (`org.keepassxc.KeePassXC` is the GUI launcher, not the CLI): Flatpak users
+# should point KEYGATE_KXC_BIN at their own wrapper.
+_KXC_CANONICAL = tuple(dict.fromkeys((
+    "/usr/bin/keepassxc-cli",
+    "/usr/local/bin/keepassxc-cli",
+    "/snap/bin/keepassxc-cli",
+    "/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli",
+    "/opt/homebrew/bin/keepassxc-cli",
+)))
+
+
+def _validate_kxc_binary(path: str) -> str:
+    """Realpath + ownership/permission checks. Returns the real path.
+
+    Rejects: non-regular files, non-executables, group/world-writable files,
+    files not owned by root or the current euid, and group/world-writable
+    parent directories (sticky /tmp is only allowed when both the directory
+    and the binary belong to the current user).
+    """
+    real = os.path.realpath(path)
+    try:
+        st = os.stat(real)
+    except OSError:
+        raise InsecureBinaryError(
+            "keepassxc-cli not usable: stat failed") from None
+    if not stat.S_ISREG(st.st_mode):
+        raise InsecureBinaryError("keepassxc-cli is not a regular file")
+    if not os.access(real, os.X_OK):
+        raise InsecureBinaryError("keepassxc-cli is not executable")
+    if os.name == "posix":
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise InsecureBinaryError(
+                "keepassxc-cli failed security ownership/permission checks "
+                "(group/world-writable binary)")
+        euid = os.geteuid()
+        if st.st_uid not in (0, euid):
+            raise InsecureBinaryError(
+                "keepassxc-cli failed security ownership/permission checks "
+                "(unexpected owner)")
+        parent = os.path.dirname(real) or "/"
+        try:
+            pst = os.stat(parent)
+        except OSError:
+            raise InsecureBinaryError(
+                "keepassxc-cli parent directory not accessible") from None
+        if pst.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            sticky = bool(pst.st_mode & stat.S_ISVTX)
+            owned_by_me = (pst.st_uid == euid and st.st_uid == euid)
+            if not (sticky and owned_by_me):
+                raise InsecureBinaryError(
+                    "keepassxc-cli failed security ownership/permission checks "
+                    "(group/world-writable parent directory)")
+    return real
+
+
+def _resolve_kxc_bin() -> str:
+    """Resolve keepassxc-cli safely: env override, canonical paths, PATH.
+
+    KEYGATE_KXC_BIN is authoritative: if it is set but invalid or insecure we
+    fail closed (no silent fallback to a different binary). Canonical paths
+    come next; if one exists but fails validation we also fail closed, because
+    silently skipping a tampered system binary would be a downgrade.
+    """
+    env = (os.environ.get("KEYGATE_KXC_BIN") or "").strip()
+    if env:
+        cand = os.path.expanduser(os.path.expandvars(env))
+        if not os.path.isabs(cand):
+            raise InsecureBinaryError(
+                "KEYGATE_KXC_BIN must be an absolute path")
+        try:
+            return _validate_kxc_binary(cand)
+        except InsecureBinaryError as exc:
+            raise InsecureBinaryError(
+                f"KEYGATE_KXC_BIN rejected: {exc}") from None
+    for cand in _KXC_CANONICAL:
+        if os.path.exists(cand):
+            return _validate_kxc_binary(cand)
     found = shutil.which("keepassxc-cli")
-    if not found:
-        raise RuntimeError("keepassxc-cli not found — apt install keepassxc")
-    return found
+    if found:
+        return _validate_kxc_binary(found)
+    raise RuntimeError(f"keepassxc-cli not found — {install_hint()}")
+
+
+def install_hint() -> str:
+    """Exact install command for this platform (no third-party imports)."""
+    if sys.platform == "darwin":
+        return "brew install --cask keepassxc"
+    for marker, cmd in (("/etc/arch-release", "sudo pacman -S keepassxc"),
+                        ("/etc/fedora-release", "sudo dnf install keepassxc"),
+                        ("/etc/debian_version", "sudo apt install keepassxc")):
+        if os.path.exists(marker):
+            return cmd
+    return "instala KeePassXC desde https://keepassxc.org/download/"
+
+
+def _kxc_version(path: str) -> Optional[str]:
+    """Parsed version string from `--version`, or None. argv-only, 5s cap."""
+    try:
+        proc = subprocess.run(
+            [path, "--version"], env=_child_env(), stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = (proc.stdout or "") + " " + (proc.stderr or "")
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", out)
+    return m.group(0) if m else None
+
+
+def doctor_check() -> Dict[str, object]:
+    """Dependency health for keepassxc-cli. Never touches the vault."""
+    out: Dict[str, object] = {
+        "kxc_found": False,
+        "kxc_path": None,
+        "kxc_source": "missing",
+        "kxc_permissions_ok": False,
+        "kxc_version": None,
+        "kxc_version_ok": False,
+        "kxc_min_version": "2.7.0",
+        "install_hint": install_hint(),
+    }
+    env = (os.environ.get("KEYGATE_KXC_BIN") or "").strip()
+    path: Optional[str] = None
+    source = "missing"
+    try:
+        if env:
+            path = _resolve_kxc_bin()
+            source = "env:KEYGATE_KXC_BIN"
+        else:
+            for cand in _KXC_CANONICAL:
+                if os.path.exists(cand):
+                    path = _validate_kxc_binary(cand)
+                    source = "system_path"
+                    break
+            if path is None:
+                found = shutil.which("keepassxc-cli")
+                if found:
+                    path = _validate_kxc_binary(found)
+                    source = "system_path"
+        if path:
+            out.update(kxc_found=True, kxc_path=path, kxc_source=source,
+                       kxc_permissions_ok=True)
+    except InsecureBinaryError as exc:
+        out["kxc_error"] = str(exc)
+        out["kxc_path"] = os.path.realpath(
+            os.path.expanduser(os.path.expandvars(env))) if env else None
+        out["kxc_source"] = "env:KEYGATE_KXC_BIN" if env else "missing"
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never raise
+        out["kxc_error"] = f"{type(exc).__name__}: {exc}"
+
+    if path:
+        ver = _kxc_version(path)
+        out["kxc_version"] = ver
+        if ver:
+            nums = tuple(int(x) for x in ver.split(".")[:3])
+            out["kxc_version_ok"] = nums >= (2, 7, 0)
+    return out
+
+
+def _kxc() -> str:
+    return _resolve_kxc_bin()
 
 
 def _run_kxc(args: List[str]) -> subprocess.CompletedProcess:
@@ -274,7 +445,8 @@ def audit(home: Path, event: dict) -> None:
 
 
 def session_dir() -> Path:
-    base = Path(os.environ.get("XDG_RUNTIME_DIR") or "/dev/shm")  # nosec B108 - runtime dir, 0700, sin secretos en reposo
+    # Runtime dir con 0700: handles efímeros, sin secretos en reposo.
+    base = Path(os.environ.get("XDG_RUNTIME_DIR") or _FALLBACK_RUNTIME_DIR)
     d = base / SESSION_DIR_NAME
     try:
         d.mkdir(parents=True, exist_ok=True)
@@ -434,3 +606,12 @@ def autofill_allows(home: Path | str, alias: str, origin: str) -> bool:
     if not norm_pol:
         return False
     return norm_req == norm_pol
+
+
+if __name__ == "__main__":
+    # Minimal CLI: `python3 keygate_lib.py --doctor` (stdlib only).
+    if "--doctor" in sys.argv or "doctor" in sys.argv[1:2]:
+        print(json.dumps(doctor_check(), indent=2, ensure_ascii=False))
+        raise SystemExit(0)
+    print("uso: python3 keygate_lib.py --doctor", file=sys.stderr)
+    raise SystemExit(2)
