@@ -131,13 +131,20 @@ def _kxc() -> str:
 
 def _run_kxc(args: List[str]) -> subprocess.CompletedProcess:
     """argv-only, stdin closed, stderr discarded (may carry secrets)."""
-    proc = subprocess.run(
-        [_kxc(), *args],
-        env=_child_env(), stdin=subprocess.DEVNULL,
-        capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=TIMEOUT,
-    )
-    return proc
+    try:
+        return subprocess.run(
+            [_kxc(), *args],
+            env=_child_env(), stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        # 124 = timeout (convención de coreutils), stdout vacío: un solo
+        # camino de error para los llamadores en vez de try/except dispersos.
+        return subprocess.CompletedProcess(args, 124, "", "")
+    except FileNotFoundError:
+        # 127 = command not found: keepassxc-cli ausente del PATH.
+        return subprocess.CompletedProcess(args, 127, "", "")
 
 
 def zeroize(buf: bytearray) -> None:
@@ -267,7 +274,7 @@ def audit(home: Path, event: dict) -> None:
 
 
 def session_dir() -> Path:
-    base = Path(os.environ.get("XDG_RUNTIME_DIR") or "/dev/shm")
+    base = Path(os.environ.get("XDG_RUNTIME_DIR") or "/dev/shm")  # nosec B108 - runtime dir, 0700, sin secretos en reposo
     d = base / SESSION_DIR_NAME
     try:
         d.mkdir(parents=True, exist_ok=True)

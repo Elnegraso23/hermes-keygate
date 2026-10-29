@@ -224,7 +224,7 @@ def _remote_version(home) -> dict:
         import urllib.request as _u
         req = _u.Request(REMOTE_VERSION_URL,
                          headers={"User-Agent": "hermes-keygate/version-check"})
-        with _u.urlopen(req, timeout=VERSION_CHECK_TIMEOUT) as r:
+        with _u.urlopen(req, timeout=VERSION_CHECK_TIMEOUT) as r:  # nosec B310 - URL constante https, sin entrada de usuario
             body = r.read(4096).decode("utf-8", errors="replace")
         for line in body.splitlines():
             if line.strip().startswith("version:"):
@@ -347,6 +347,7 @@ def register(ctx):
         q = str((params or {}).get("query") or "").strip().lower()
         if kg.db_locked(db, kf):
             return json.dumps({"success": False, "locked": True,
+                               "error_type": "db_locked",
                                "error": "operative DB locked — unlock hermes.kdbx locally"})
         out = []
         for entry in kg.list_entries(db, kf):
@@ -502,6 +503,7 @@ def register(ctx):
         db, kf = kg.cfg_paths(cfg)
         if kg.db_locked(db, kf):
             return json.dumps({"success": False, "locked": True,
+                               "error_type": "db_locked",
                                "error": "operative DB locked — unlock hermes.kdbx locally"})
 
         # 0) Pre-flight BEFORE any prompt: tab must already be bound.
@@ -817,9 +819,14 @@ def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
     try:
         m = _re.search(r"otpauth://totp/[^\s'\"]+", out)
         if m:
-            sm = _re.search(r"[?&]secret=([A-Z2-7=]+)", m.group(0), _re.IGNORECASE)
-            if sm:
-                return sm.group(1).upper()
+            from urllib.parse import parse_qs, urlsplit as _urlsplit
+            try:
+                _qs = parse_qs(_urlsplit(m.group(0)).query)
+            except ValueError:
+                _qs = {}
+            seed = (_qs.get("secret") or [""])[0].replace(" ", "").upper()
+            if seed and _re.fullmatch(r"[A-Z2-7]+=*", seed):
+                return seed
         m = _re.search(r"(?im)^\s*(?:TOTP\s*)?(?:Seed|Secret)\s*:\s*([A-Z2-7=\s]+)\s*$", out)
         if m:
             return _re.sub(r"\s+", "", m.group(1)).upper()

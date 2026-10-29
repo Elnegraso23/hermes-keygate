@@ -4,6 +4,20 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.2 — 2026-10-28
+- Calidad: `error_type: "db_locked"` uniforme, `otpauth://` parseado con
+  `urlparse`, errores tipados en `_run_kxc` (124 timeout / 127 binario ausente),
+  `db_mtime` visible en la web, `clearTimeout` al copiar alias y vista de
+  auditoría persistida en `localStorage`.
+- CI: job `security` (bandit `-ll`, semgrep `p/python`+`p/secrets`, gitleaks).
+- README: badges y aviso de versión alineados a 0.6.2.
+
+## 0.6.1 — 2026-10-28
+- Seguridad H1–H9: igualdad estricta de orígenes (sin subcadenas ni userinfo),
+  CSRF y cabeceras CSP en keygate-sync, relleno en subgrupos, lock atómico del
+  keyfile, rate limit separado para fallos de auth y guard estricto de autofill.
+- Selftest ampliado a 32 casos.
+
 ## 0.6.0 — 2026-10-26
 - **Auto-relleno por alias (opt-in desde la web)**: política por cuenta en
   `~/.hermes/keygate-autofill.json` (0600, escritura atómica). Si el alias tiene

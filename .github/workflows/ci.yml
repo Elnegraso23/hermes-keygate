@@ -55,3 +55,24 @@ jobs:
           echo "scripts OK"
       - name: Autofill policy tests
         run: python3 -m unittest discover -s tests -p 'test_autofill*.py' -v
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Instalar escaneres
+        run: pip install -q bandit semgrep
+      - name: Seguridad - Bandit (falla en medium/high)
+        run: bandit -q -ll -r . -x ./tests,./.git,./__pycache__
+      - name: Seguridad - Semgrep (solo errores)
+        run: semgrep scan --config p/python --config p/secrets --severity ERROR --error --quiet .
+      - name: Seguridad - Gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --redact --config .gitleaks.toml --exit-code 1
+          echo "gitleaks: sin fugas"

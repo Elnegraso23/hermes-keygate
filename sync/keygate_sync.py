@@ -326,7 +326,7 @@ De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ning
 </div>
 </div>
 <script>
-let __auditRaw = false;
+let __auditRaw = localStorage.getItem('kg_audit_raw') === '1';
 let __lastAuditLines = [];
 let __aliasRows = [];
 function authHeaders() {
@@ -451,9 +451,11 @@ async function copyAlias(i, btn) {
   if (!alias || !navigator.clipboard) return;
   try {
     await navigator.clipboard.writeText(alias);
-    const old = btn.textContent;
+    const old = btn.dataset.label || btn.textContent;
+    btn.dataset.label = old;
     btn.textContent = '✓ Copiado';
-    setTimeout(() => { btn.textContent = old; }, 1400);
+    clearTimeout(btn.__t);
+    btn.__t = setTimeout(() => { btn.textContent = old; }, 1400);
   } catch (e) {}
 }
 function renderAliases() {
@@ -519,6 +521,7 @@ function renderAudit() {
 }
 function toggleAuditRaw() {
   __auditRaw = !__auditRaw;
+  localStorage.setItem('kg_audit_raw', __auditRaw ? '1' : '0');
   document.getElementById('auditmodebtn').textContent = __auditRaw ? 'Ver vista estructurada' : 'Ver JSON crudo';
   renderAudit();
 }
@@ -532,7 +535,8 @@ async function load() {
   window.__aliases = items.map(x => x.alias);
   const kb = b.db_size ? (b.db_size / 1024).toFixed(1) + ' KB' : '0 KB';
   const baks = (b.backups !== undefined) ? `${b.backups} backups` : '';
-  document.getElementById('dbmeta').textContent = `💾 ${kb}` + (baks ? ` · ${baks}` : '');
+  const mt = b.db_mtime ? new Date(b.db_mtime * 1000).toLocaleString() : '';
+  document.getElementById('dbmeta').textContent = `💾 ${kb}` + (baks ? ` · ${baks}` : '') + (mt ? ` · ${mt}` : '');
   const af = await api('/api/autofill');
   const amap = {};
   ((af.body && af.body.items) || []).forEach(x => { amap[x.alias] = x; });
@@ -1189,7 +1193,7 @@ def main() -> int:
     if os.environ.get("KEYGATE_SYNC_TOKEN"):
         print("aviso: KEYGATE_SYNC_TOKEN ya no se usa (auth ahora por contraseña creada en primera visita).",
               file=sys.stderr)
-    if bind == "0.0.0.0":
+    if bind == "0.0.0.0":  # nosec B104 - es la comprobación que lo rechaza
         print("REFUSED: no bindees 0.0.0.0 — usa 127.0.0.1 o tu IP Tailscale.", file=sys.stderr)
         return 2
     if not Path(db).exists():
@@ -1209,7 +1213,7 @@ def main() -> int:
             pass
     except Exception:
         pass
-    srv = ThreadingHTTPServer((bind, port), Handler)
+    srv = ThreadingHTTPServer((bind, port), Handler)  # nosec B104 - bind validado arriba: 0.0.0.0 se rechaza
     print(f"keygate-sync en http://{bind}:{port} (solo red local/Tailscale)")
     print("Auth por contraseña (PBKDF2, solo en tu navegador por pestaña). Jamás por chat (queda en historial).")
     try:

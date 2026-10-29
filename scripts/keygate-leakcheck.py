@@ -147,7 +147,7 @@ try:
             data=json.dumps(data).encode() if data is not None else None,
             headers=hdrs)
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310 - servidor local de prueba
                 return r.status, r.read()
         except Exception as e:
             body = e.read() if hasattr(e, "read") else b""
@@ -157,7 +157,7 @@ try:
     _, aliases = api("/api/aliases")
     _, waudit = api("/api/audit?limit=50")
     req = urllib.request.Request("http://127.0.0.1:8479/api/download", headers=H)
-    with urllib.request.urlopen(req, timeout=15) as r:
+    with urllib.request.urlopen(req, timeout=15) as r:  # nosec B310 - servidor local de prueba
         blob = r.read()
     check("web-aliases", {"json": aliases.decode()})
     check("web-audit", {"json": waudit.decode()})
