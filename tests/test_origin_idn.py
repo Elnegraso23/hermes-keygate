@@ -28,10 +28,11 @@ def test_control_chars_and_whitespace_rejected():
 
 
 def test_empty_labels_and_bad_lengths_rejected():
-    for bad in ("https://evil..com", "https://.evil.com"):
+    for bad in ("https://evil..com", "https://.evil.com", "https://evil.com..",
+                "https://evil.com..."):
         assert kg.normalize_origin(bad) == "", bad
-    # Trailing dots are DNS-equivalent: canonicalized to the bare host.
-    assert kg.normalize_origin("https://evil.com..") == "https://evil.com"
+    # Exactly one trailing dot is a valid FQDN root (RFC 1035): dropped.
+    assert kg.normalize_origin("https://evil.com.") == "https://evil.com"
     long_label = "a" * 64
     assert kg.normalize_origin(f"https://{long_label}.com") == ""
 

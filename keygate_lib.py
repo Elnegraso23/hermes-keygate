@@ -531,7 +531,18 @@ def _canonical_host(host: str) -> str:
         return ""
     if "%" in host:  # percent-encoded hosts are ambiguous by design
         return ""
-    h = host.strip().lower().rstrip(".")
+    h = host.strip().lower()
+    # keepassxc-cli may append a newline: trim only at the very end. Any \r or
+    # \n still inside the string is a control character and is rejected below.
+    h = h.rstrip("\r\n")
+    if "\r" in h or "\n" in h:
+        return ""
+    # RFC 1035 / WHATWG: one trailing dot is a valid FQDN root and is dropped;
+    # two or more trailing dots mean empty labels -> fail closed.
+    if h.endswith("."):
+        if h.endswith(".."):
+            return ""
+        h = h[:-1]
     if not h or h.startswith(".") or ".." in h or len(h) > 253:
         return ""
     try:  # IPv4/IPv6 literals are canonicalized, not IDNA-encoded
