@@ -2,7 +2,7 @@
 **Español** · [English](README.en.md)
 
 [![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
@@ -19,7 +19,7 @@
 
 Hermes se loguea en tus sitios **sin ver jamás tus contraseñas**: tú apruebas
 en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
-*1Password for Claude*, 100% open source y self-hosted.
+*1Password for Claude*, código disponible (source-available) y self-hosted.
 
 ## Índice
 
@@ -38,6 +38,7 @@ en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
 - [Herramientas del plugin](#herramientas-del-plugin)
 - [Estructura del repo](#estructura-del-repo)
 - [FAQ](#faq)
+- [Licencia](#licencia)
 - [Límites honestos](#límites-honestos)
 
 ## Cómo funciona (diseño en 30 segundos)
@@ -535,3 +536,15 @@ deja crear otra. Nunca por chat.
   con cuenta real con 2FA.
 - `fetch()` de SecretSource solo hidrata refs `kpx://` que mapees: no mapees
   todo el vault, solo API keys necesarias.
+
+## Licencia
+
+**PolyForm Noncommercial 1.0.0.** Podés usar, modificar y compartir keygate para
+cualquier fin **no comercial**: uso personal, estudio, investigación y proyectos
+internos sin ánimo de lucro. **No podés venderlo, revenderlo ni ofrecerlo como
+servicio pago** sin una licencia comercial aparte; si te interesa, escribime.
+
+No es una licencia OSI (restringe el uso comercial), así que algunos portales y
+empresas la clasifican distinto de MIT o Apache. El código sigue siendo público,
+auditable y self-hosted. Las versiones publicadas hasta la v0.6.1 bajo MIT
+permanecen MIT para quien ya las descargó; este cambio aplica hacia adelante.

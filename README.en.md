@@ -1,6 +1,6 @@
 # 🔑 hermes-keygate — secure KeePassXC logins for Hermes Agent
 [Español](README.md) · **English**
-[![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.en.md) [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py) [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
+[![Version](https://img.shields.io/badge/version-0.6.1-orange.svg)](CHANGELOG.md) [![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE) [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.en.md) [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py) [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
 
 > **⚠️ ALPHA (v0.6.1) — fresh software, with known flaws.**
 > Works on real machines but changes fast and sometimes breaks
@@ -14,7 +14,7 @@
 
 Hermes logs into your sites **without ever seeing your passwords**: you approve
 in KeePassXC, a plugin injects them straight into the page. Inspired by
-*1Password for Agents*, 100% open source and self-hosted.
+*1Password for Agents*, source-available and self-hosted.
 
 ## Table of Contents
 
@@ -485,3 +485,14 @@ you create another. Never via Telegram/chat.
   end-to-end test with real 2FA account pending.
 - `fetch()` from SecretSource only hydrates `kpx://` refs you map: don't map
   the whole vault, only necessary API keys.
+
+## License
+
+**PolyForm Noncommercial 1.0.0.** You may use, modify and share keygate for any
+**noncommercial** purpose: personal use, study, research, and internal projects
+without commercial advantage. You may **not** sell it, resell it, or offer it as
+a paid service without a separate commercial license.
+
+This is not an OSI license (it restricts commercial use). The code remains
+public, auditable and self-hosted. Versions published up to v0.6.1 under MIT
+stay MIT for whoever already downloaded them; this change applies going forward.
