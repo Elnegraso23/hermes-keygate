@@ -903,8 +903,22 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     flag.parent.mkdir(parents=True, exist_ok=True)
                     fd = os.open(str(flag), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                    with os.fdopen(fd, "w") as f:
-                        f.write(f"{int(time.time())}\n")
+                    try:
+                        os.write(fd, f"{int(time.time())}\n".encode("ascii"))
+                        # H14: the one-shot marker must be durable BEFORE the
+                        # key bytes leave the process, or a crash could serve
+                        # the file twice after a reboot.
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                    try:  # durability of the directory entry itself (POSIX)
+                        dfd = os.open(str(flag.parent), os.O_RDONLY)
+                        try:
+                            os.fsync(dfd)
+                        finally:
+                            os.close(dfd)
+                    except OSError:
+                        pass
                 except FileExistsError:
                     self._send(410, {"success": False, "error": "already served (one-time)"})
                     return

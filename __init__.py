@@ -536,6 +536,16 @@ def register(ctx):
                                          "run from an interactive CLI/Desktop/Telegram session")})
         leaf_alias = match.split("/")[-1]
         auto = kg.autofill_allows(_home(), leaf_alias, origin)
+        if auto and not kg.autofill_rate_ok(leaf_alias):
+            # Loop/burn protection: an agent retrying in a cycle must not
+            # drain the vault silently. Explicit, auditable refusal.
+            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(leaf_alias),
+                               "origin": kg.redact_origin(origin),
+                               "decision": "alias_auto_rate_limited",
+                               "policy": "alias-auto"})
+            return json.dumps({"success": False, "error_type": "alias_auto_rate_limited",
+                               "error": ("auto-fill rate limit reached for this alias "
+                                         "(max 5/min) — ask the user before retrying")})
         approval_evidence = {}
         if auto:
             approval_evidence = {"approval": "auto-policy"}
@@ -549,8 +559,11 @@ def register(ctx):
                      "enter the chat, logs or memory — only this prompt. One-time use: "
                      "next fill asks again."),
                     surface="keygate-fill", title="Allow credential fill?")
-            except Exception as exc:
-                return json.dumps({"success": False, "error": f"approval unavailable: {exc}"})
+            except Exception:
+                # Fixed string: exception text can carry paths or internals.
+                return json.dumps({"success": False,
+                                   "error_type": "approval_unavailable",
+                                   "error": "approval prompt unavailable in this session"})
             approval_evidence = {"approval": str(decision)}
             if decision != "accept":
                 kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(leaf_alias),
@@ -838,6 +851,61 @@ def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
         out = ""
 
 
+def _fill_resolve_entry(db: str, kf: str, alias: str, origin: str) -> dict:
+    """H16: alias -> full vault path + exact-origin binding (no CDP).
+
+    Returns {"entry","bound"} or {"error": <tool payload>}.
+    """
+    entry = alias
+    if "/" not in entry:
+        resolved, _err = kg.resolve_entry(db, kf, entry)
+        if resolved:
+            entry = resolved
+    entry_url = kg.show_field(db, kf, entry, "url") or ""
+    want = kg.normalize_origin(origin)
+    bound = kg.normalize_origin(entry_url)
+    if not bound:
+        return {"error": {"success": False, "filled_fields": 0, "origin": origin,
+                          "error_type": "domain_mismatch",
+                          "error": "entry has no valid URL in KeePass — refused"}}
+    if not want or want != bound:
+        return {"error": {"success": False, "filled_fields": 0, "origin": origin,
+                          "error_type": "domain_mismatch",
+                          "error": "vault URL != requested origin — refused"}}
+    return {"entry": entry, "bound": bound}
+
+
+def _fill_bind_page(task_id: str, bound: str) -> dict:
+    """H16: require a live tab already on the bound origin (pre-flight).
+
+    Returns {"page_origin"} or {"error": <tool payload>}. Messages are fixed
+    constants: never interpolate the page origin or exception text.
+    """
+    from tools.browser_vault_tool import _current_page_origin, _focus_bound_origin
+    page_origin = None
+    try:
+        page_origin = _focus_bound_origin(task_id, bound, "login")
+    except Exception:
+        page_origin = None
+    try:
+        page_origin = page_origin or _current_page_origin(task_id)
+    except Exception:
+        return {"error": {"success": False, "filled_fields": 0, "origin": bound,
+                          "error_type": "browser_unavailable",
+                          "error": "browser session unavailable"}}
+    if not page_origin:
+        return {"error": {"success": False, "filled_fields": 0, "origin": bound,
+                          "error": ("no page open in the agent browser — navigate with "
+                                    "browser_navigate (not the Desktop preview panel) to the "
+                                    "login page first, then retry")}}
+    page_norm = kg.normalize_origin(page_origin)
+    if not page_norm or page_norm != bound:
+        return {"error": {"success": False, "filled_fields": 0, "origin": bound,
+                          "error_type": "origin_mismatch",
+                          "error": "page origin != bound origin — refused"}}
+    return {"page_origin": page_origin}
+
+
 def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str) -> dict:
     """Blind fill through Hermes' native secret-safe machinery.
 
@@ -895,46 +963,15 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
 
     task_id = _resolve_effective_task(task_id)
 
-    entry = alias
-    if "/" not in entry:
-        resolved, _err = kg.resolve_entry(db, kf, entry)
-        if resolved:
-            entry = resolved
+    _resolved = _fill_resolve_entry(db, kf, alias, origin)
+    if "error" in _resolved:
+        return _resolved["error"]
+    entry, bound = _resolved["entry"], _resolved["bound"]
 
-    entry_url = kg.show_field(db, kf, entry, "url") or ""
-    want = kg.normalize_origin(origin)
-    bound = kg.normalize_origin(entry_url)
-    if not bound:
-        return {"success": False, "filled_fields": 0, "origin": origin,
-                "error_type": "domain_mismatch",
-                "error": "entry has no valid URL in KeePass — refused"}
-    if not want or want != bound:
-        return {"success": False, "filled_fields": 0, "origin": origin,
-                "error_type": "domain_mismatch",
-                "error": "vault URL != requested origin — refused"}
-    allowed = [bound]
-
-    page_origin = None
-    for candidate in allowed:
-        try:
-            page_origin = _focus_bound_origin(task_id, candidate, "login")
-        except Exception:
-            page_origin = None
-        if page_origin:
-            break
-    try:
-        page_origin = page_origin or _current_page_origin(task_id)
-    except Exception as exc:
-        return {"success": False, "filled_fields": 0, "origin": origin, "error": str(exc)[:200]}
-    if not page_origin:
-        return {"success": False, "filled_fields": 0, "origin": origin,
-                "error": ("no page open in the agent browser — navigate with browser_navigate "
-                          "(not the Desktop preview panel) to the login page first, then retry")}
-    page_norm = kg.normalize_origin(page_origin)
-    if not page_norm or page_norm not in allowed:
-        return {"success": False, "filled_fields": 0, "origin": origin,
-                "error_type": "origin_mismatch",
-                "error": f"page {page_origin!r} != bound {', '.join(allowed)} — refused"}
+    _page = _fill_bind_page(task_id, bound)
+    if "error" in _page:
+        return _page["error"]
+    page_origin = _page["page_origin"]
 
     username = kg.show_field(db, kf, entry, "username") or ""
     pw_raw = kg.show_field(db, kf, entry, "password") or ""

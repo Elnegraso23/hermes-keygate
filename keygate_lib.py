@@ -13,6 +13,7 @@ Security boundaries:
 from __future__ import annotations
 
 import ctypes
+import ipaddress
 import json
 import os
 import re
@@ -517,15 +518,52 @@ def session_invalidate(domain: str) -> bool:
 _AUTOFILL_LOCK = threading.Lock()
 
 
+def _canonical_host(host: str) -> str:
+    """Strict ASCII host: lowercase, per-label punycode, length checks.
+
+    Homographs are the point: a Cyrillic 'а' in "аpple.com" encodes to
+    "xn--pple-43d" and can never equal "apple.com". Returns "" on anything
+    that is not a valid hostname/IP literal.
+    """
+    if not host:
+        return ""
+    if any(ord(c) < 0x21 or ord(c) == 0x7f for c in host):
+        return ""
+    if "%" in host:  # percent-encoded hosts are ambiguous by design
+        return ""
+    h = host.strip().lower().rstrip(".")
+    if not h or h.startswith(".") or ".." in h or len(h) > 253:
+        return ""
+    try:  # IPv4/IPv6 literals are canonicalized, not IDNA-encoded
+        return str(ipaddress.ip_address(h))
+    except ValueError:
+        pass
+    labels = []
+    for lab in h.split("."):
+        if not lab or len(lab) > 63:
+            return ""
+        try:
+            asc = lab.encode("idna").decode("ascii").lower()
+        except (UnicodeError, UnicodeDecodeError):
+            return ""
+        if not asc or len(asc) > 63:
+            return ""
+        labels.append(asc)
+    return ".".join(labels)
+
+
 def normalize_origin(origin: Optional[str]) -> str:
     """Canonical scheme://host[:port] for http/https URLs.
 
     Rejects userinfo (https://good.com@evil.com), non-http(s) schemes,
-    missing hosts, or malformed ports. Strips default ports (:80 for http,
-    :443 for https) and trailing dots so exact string comparison is safe.
+    control characters, whitespace, empty labels and malformed ports.
+    IDN hosts are punycoded per label, so homographs never collide.
+    Default ports are stripped and http/https are never interchangeable.
     """
     s = (origin or "").strip()
-    if not s:
+    if not s or len(s) > 2048:
+        return ""
+    if any(ord(c) < 0x21 or ord(c) == 0x7f for c in s):
         return ""
     try:
         parsed = urlsplit(s)
@@ -534,8 +572,8 @@ def normalize_origin(origin: Optional[str]) -> str:
             return ""
         if parsed.username is not None or parsed.password is not None or "@" in (parsed.netloc or ""):
             return ""
-        host = (parsed.hostname or "").lower().rstrip(".")
-        if not host or any(c.isspace() for c in host):
+        host = _canonical_host(parsed.hostname or "")
+        if not host:
             return ""
         try:
             port = parsed.port
@@ -614,6 +652,34 @@ def set_autofill(home: Path | str, alias: str, origin: str, enabled: bool) -> No
                 "source": "web"
             }
         save_autofill(home, data)
+
+
+AUTO_FILL_MAX = 5          # fills per alias per window under alias-auto
+AUTO_FILL_WINDOW = 60.0
+_auto_hits: Dict[str, List[float]] = {}
+_auto_lock = threading.Lock()
+
+
+def autofill_rate_ok(alias: str) -> bool:
+    """Sliding-window cap for alias-auto fills (loop/burn protection).
+
+    Consumes one slot when allowed. In-memory by design: a restart clears it,
+    which is fine for a per-agent runaway loop.
+    """
+    key = (alias or "").lower()
+    now = time.time()
+    with _auto_lock:
+        arr = [t for t in _auto_hits.get(key, []) if now - t < AUTO_FILL_WINDOW]
+        if len(arr) >= AUTO_FILL_MAX:
+            _auto_hits[key] = arr
+            return False
+        arr.append(now)
+        if len(_auto_hits) > 128:  # opportunistic purge of idle aliases
+            for k in [k for k, v in _auto_hits.items()
+                      if not v or now - v[-1] > AUTO_FILL_WINDOW]:
+                _auto_hits.pop(k, None)
+        _auto_hits[key] = arr
+        return True
 
 
 def autofill_allows(home: Path | str, alias: str, origin: str) -> bool:

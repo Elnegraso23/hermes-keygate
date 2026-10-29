@@ -4,6 +4,21 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.5 — 2026-10-28
+- **H13 — normalize_origin endurecido**: canonicalización IDNA por etiqueta
+  (`https://аpple.com` → `https://xn--pple-43d.com`), rechazo de caracteres de
+  control/espacios, etiquetas vacías y longitudes inválidas; IP literales
+  canonicalizadas; `http://` y `https://` nunca equivalentes.
+- **H14 — centinela durable**: `fsync()` del archivo y del directorio padre
+  antes de enviar el `.key`; el flag one-shot sobrevive a cortes y reinicios.
+- **H15 — errores opacos + límite alias-auto**: mensajes constantes (sin
+  interpolar excepciones ni stdout/stderr) y tope de 5 rellenos/minuto por
+  alias con `error_type: alias_auto_rate_limited`, auditado como `alias-auto`.
+- **H16 — refactor de `_native_keygate_fill`**: extraídos `_fill_resolve_entry`
+  y `_fill_bind_page`; se conserva el `try/finally` con `zeroize` en toda ruta.
+- Tests: `test_origin_idn.py` (7), `test_autofill_rate.py` (2), selftest H14
+  con 8 descargas concurrentes → 40 PASS.
+
 ## 0.6.4 — 2026-10-28
 - **H11 — TOCTOU e iframes cerrados en el fill**: el JS de relleno se envuelve en
   una guardia atómica que corre en la MISMA evaluación que escribe en el DOM:

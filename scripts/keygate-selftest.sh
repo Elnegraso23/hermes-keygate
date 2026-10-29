@@ -248,6 +248,27 @@ r=$(curl -s -m 30 -X POST -H "$H" -F "db=@$EDB;filename=hermes.kdbx" "$B/api/upl
 echo "$r" | grep -q "anti-wipe" && ok "upload vacío rehusado (anti-wipe)" || bad "anti-wipe" "$r"
 left=$(ls "$(dirname "$SDB")"/hermes.kdbx.* 2>/dev/null | grep -v -E "\.bak$|srvdb" | wc -l)
 [ "$left" = "0" ] && ok "staging limpiado tras rechazo" || bad "staging huerfano" "$left archivos"
+# --- 11b. H14: descarga única del .key bajo concurrencia real ---
+FLAG14="$(dirname "$SDB")/.keygate-keyfile-served"
+rm -f "$FLAG14" "$TMP/h14.codes"
+h14_pids=""
+for i in $(seq 1 8); do
+  curl -s -m 10 -o /dev/null -w "%{http_code}\n" \
+    -H "Authorization: Bearer $PW2" "$B/api/onboarding/keyfile" >> "$TMP/h14.codes" &
+  h14_pids="$h14_pids $!"
+done
+# wait SOLO por los curls: un `wait` pelado esperaría también al servidor.
+for pid in $h14_pids; do wait "$pid" 2>/dev/null || true; done
+n200=$(grep -c '^200$' "$TMP/h14.codes" 2>/dev/null || true)
+if [ "$n200" = "1" ]; then
+  ok "H14: exactamente 1 descarga de .key con 8 hilos"
+else
+  bad "H14 concurrencia" "esperaba 1x200, obtuve: $(tr '\n' ' ' < "$TMP/h14.codes")"
+fi
+perm14=$(stat -c '%a' "$FLAG14" 2>/dev/null || echo missing)
+[ "$perm14" = "600" ] && ok "H14: centinela persiste 0600" \
+  || bad "H14 permisos del centinela" "modo=$perm14"
+
 kill $SRV 2>/dev/null || true
 
 # --- 11. keygate-setup --reset-key con la DB YA CREADA ---

@@ -370,7 +370,7 @@ Luego el prompt de uso diario con `alias internet-agent-1` y
 `origin https://the-internet.herokuapp.com`. Éxito =
 `You logged into a secure area!` + audit `allow` + `approval: accept`.
 
-## Defensas de sesión (H11–H12)
+## Defensas de sesión (H11–H16)
 
 - **El relleno es atómico y solo en el top-level.** La guardia de origen y la de
   `window.top === window.self` viajan dentro del mismo `Runtime.evaluate` que
@@ -380,6 +380,20 @@ Luego el prompt de uso diario con `alias internet-agent-1` y
 - **Host allowlist contra DNS rebinding.** El servidor web acepta únicamente el
   `Host` de su IP de bind (y `localhost`/`127.0.0.1` cuando escucha en loopback);
   cualquier otro `Host` recibe 403 antes de tocar una ruta.
+- **IDN/punycode (H13).** Los hosts se canonicalizan etiqueta por etiqueta:
+  `https://аpple.com` (а cirílica) → `https://xn--pple-43d.com`, que nunca
+  coincide con `https://apple.com`. Se rechazan caracteres de control, etiquetas
+  vacías y longitudes inválidas; `http://` y `https://` jamás son equivalentes.
+- **Centinela durable (H14).** La marca de descarga única del `.key` se escribe
+  con `O_CREAT|O_EXCL` + `fsync()` del archivo y del directorio antes de enviar
+  los bytes: un corte o reinicio no habilita una segunda descarga.
+- **Errores opacos y tope en alias-auto (H15).** Los mensajes al modelo son
+  constantes (nunca interpolan excepciones ni stdout/stderr), y una política
+  `alias-auto` se corta a los 5 rellenos/minuto por alias con
+  `error_type: alias_auto_rate_limited`, auditado con `policy: alias-auto`.
+- **Fill modular (H16).** `_native_keygate_fill` delega la resolución de entrada
+  y el binding de pestaña en helpers auditables; el `try/finally` que hace
+  `zeroize` de los buffers de secreto queda intacto.
 
 ## Dependencia: keepassxc-cli (endurecida, H10)
 
