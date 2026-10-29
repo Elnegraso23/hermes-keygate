@@ -69,6 +69,13 @@ Ten en cuenta la consecuencia: al ser una licencia no comercial, si en el futuro
 el proyecto quisiera cambiar de licencia, haría falta el permiso de cada persona
 que haya aportado código.
 
+### Si pegas un parche en un issue
+
+No se transfieren tus derechos: **tú conservas el copyright de lo que escribes**.
+Al pegarlo aquí declaras que lo licencias bajo PolyForm Noncommercial 1.0.0, igual
+que el resto del proyecto, y que tienes derecho a hacerlo (código propio, no
+copiado de un proyecto con otra licencia).
+
 ## Alcance
 
 Bienvenido: compatibilidad con más sitios y flujos OAuth, endurecimiento,
