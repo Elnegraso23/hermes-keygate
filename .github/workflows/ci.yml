@@ -75,6 +75,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      # El venv cacheado guarda un shebang absoluto al Python del runner: si la
+      # imagen sube de parche (3.11.17 -> 3.11.18) el binario queda inservible.
+      # Por eso la clave incluye la versión exacta y además se valida al usarlo.
+      - name: Python patch version
+        id: pyver
+        run: echo "v=$(python3 -c 'import sys;print(sys.version.split()[0])')" >> "$GITHUB_OUTPUT"
+
       # Cache del venv ya instalado + binario de gitleaks + reglas de semgrep.
       # En cache-hit no se instala nada: solo se ejecutan los escáneres.
       - name: Cache security tools
@@ -85,10 +92,23 @@ jobs:
             ~/.cache/kg-ci/venv
             ~/.cache/kg-ci/bin
             ~/.cache/semgrep
-          key: sec-tools-${{ runner.os }}-py311-bandit${{ env.BANDIT_VERSION }}-semgrep${{ env.SEMGREP_VERSION }}-gitleaks${{ env.GITLEAKS_VERSION }}
+          key: sec-tools-${{ runner.os }}-py${{ steps.pyver.outputs.v }}-bandit${{ env.BANDIT_VERSION }}-semgrep${{ env.SEMGREP_VERSION }}-gitleaks${{ env.GITLEAKS_VERSION }}
+
+      - name: Check cached tools
+        id: tools-check
+        run: |
+          set -euo pipefail
+          if [ -x "$HOME/.cache/kg-ci/venv/bin/bandit" ] \
+             && "$HOME/.cache/kg-ci/venv/bin/bandit" --version >/dev/null 2>&1 \
+             && "$HOME/.cache/kg-ci/venv/bin/semgrep" --version >/dev/null 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            rm -rf "$HOME/.cache/kg-ci/venv" "$HOME/.cache/kg-ci/bin"
+          fi
 
       - name: Install security tools (cache miss only)
-        if: steps.tools-cache.outputs.cache-hit != 'true'
+        if: steps.tools-cache.outputs.cache-hit != 'true' || steps.tools-check.outputs.ok != 'true'
         run: |
           set -euo pipefail
           python3 -m venv "$HOME/.cache/kg-ci/venv"
