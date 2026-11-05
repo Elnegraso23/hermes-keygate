@@ -6,14 +6,12 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 
 ## 0.6.7 — 2026-11-05
 
-- **Licencia**: PolyForm Noncommercial 1.0.0 → **MIT**. El proyecto vuelve a ser
-  software libre OSI aprobado, sin restricción de uso comercial. Se actualizan
-  `LICENSE`, badges y las secciones de licencia de README/CONTRIBUTING.
+- **Licencia**: el proyecto pasa a **MIT**, software libre OSI aprobado y sin
+  restricción de uso comercial. Se actualizan `LICENSE`, badges y las secciones
+  de licencia de README/CONTRIBUTING.
 
 ## 0.6.6 — 2026-10-29
 
-- **Licencia**: MIT → **PolyForm Noncommercial 1.0.0** (uso libre no comercial;
-  uso comercial requiere licencia aparte). Ver `LICENSE` y la sección *Licencia*.
 - **Cadena de custodia**: commits y tags firmados con SSH (ed25519), llave de
   firma registrada en GitHub; release con checksum SHA-256 del código fuente.
 - README: se corrige la afirmación "100% open source" → *source-available*, y el
