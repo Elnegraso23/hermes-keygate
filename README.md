@@ -1,8 +1,8 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.6-orange.svg)](CHANGELOG.md)
-[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.6.7-orange.svg)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
@@ -19,7 +19,7 @@
 
 Hermes se loguea en tus sitios **sin ver jamás tus contraseñas**: tú apruebas
 en tu pantalla, un plugin las inyecta directo en la página. Inspirado en
-*1Password for Claude*, código disponible (source-available) y self-hosted.
+*1Password for Claude*, open source (MIT) y self-hosted.
 
 ## Índice
 
@@ -540,15 +540,12 @@ deja crear otra. Nunca por chat.
 
 ## Licencia
 
-**PolyForm Noncommercial 1.0.0.** Podés usar, modificar y compartir keygate para
-cualquier fin **no comercial**: uso personal, estudio, investigación y proyectos
-internos sin ánimo de lucro. **No podés venderlo, revenderlo ni ofrecerlo como
-servicio pago** sin una licencia comercial aparte; si te interesa, escribime.
+**MIT.** Podés usar, copiar, modificar, fusionar, publicar, distribuir,
+sublicenciar y vender el software sin restricciones, conservando el aviso de
+copyright y esta licencia. Se entrega **sin garantía** de ningún tipo.
 
-No es una licencia OSI (restringe el uso comercial), así que algunos portales y
-empresas la clasifican distinto de MIT o Apache. El código sigue siendo público,
-auditable y self-hosted. Las versiones publicadas hasta la v0.6.1 bajo MIT
-permanecen MIT para quien ya las descargó; este cambio aplica hacia adelante.
+Ver [`LICENSE`](LICENSE). Es una licencia OSI aprobada, compatible con la
+mayoría de portales y empresas.
 
 ## Contribuir
 

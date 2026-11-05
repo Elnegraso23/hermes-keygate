@@ -61,18 +61,13 @@ igual. Lo único que se exige es que el commit tenga autor identifiable.
 
 ## Licencia de tus aportaciones
 
-El proyecto está bajo **PolyForm Noncommercial 1.0.0**. Al enviar un PR aceptas que
-tu aportación se distribuya bajo esa misma licencia (inbound = outbound). No hay
-CLA que firmar.
-
-Ten en cuenta la consecuencia: al ser una licencia no comercial, si en el futuro
-el proyecto quisiera cambiar de licencia, haría falta el permiso de cada persona
-que haya aportado código.
+El proyecto está bajo **MIT**. Al enviar un PR aceptas que tu aportación se
+distribuya bajo esa misma licencia (inbound = outbound). No hay CLA que firmar.
 
 ### Si pegas un parche en un issue
 
 No se transfieren tus derechos: **tú conservas el copyright de lo que escribes**.
-Al pegarlo aquí declaras que lo licencias bajo PolyForm Noncommercial 1.0.0, igual
+Al pegarlo aquí declaras que lo licencias bajo MIT, igual
 que el resto del proyecto, y que tienes derecho a hacerlo (código propio, no
 copiado de un proyecto con otra licencia).
 

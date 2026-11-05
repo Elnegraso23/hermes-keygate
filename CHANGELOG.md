@@ -4,6 +4,12 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.7 — 2026-11-05
+
+- **Licencia**: PolyForm Noncommercial 1.0.0 → **MIT**. El proyecto vuelve a ser
+  software libre OSI aprobado, sin restricción de uso comercial. Se actualizan
+  `LICENSE`, badges y las secciones de licencia de README/CONTRIBUTING.
+
 ## 0.6.6 — 2026-10-29
 
 - **Licencia**: MIT → **PolyForm Noncommercial 1.0.0** (uso libre no comercial;
