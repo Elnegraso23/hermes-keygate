@@ -119,3 +119,16 @@ def test_single_valid_host_still_serves_the_page(srv):
     c.close()
     assert r.status == 200
     assert b"keygate-sync" in body
+
+
+def test_server_header_does_not_leak_versions(srv):
+    """ZAP Low: `Server: keygate-sync/0.2 Python/3.14` facilita fingerprinting."""
+    ks, port, _ = srv
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+    r = c.getresponse()
+    r.read()
+    server = r.getheader("Server") or ""
+    c.close()
+    assert not any(ch.isdigit() for ch in server), server
+    assert "Python" not in server, server

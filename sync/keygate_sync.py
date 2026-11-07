@@ -738,7 +738,11 @@ def _build_allowed_hosts(bind: str, port: int) -> set:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "keygate-sync/0.2"
+    # Sin versión en la cabecera Server: ZAP lo marca como fuga de información
+    # y a un atacante le ahorra fingerprinting. sys_version vacío evita el
+    # "Python/3.x" que BaseHTTPRequestHandler añade por defecto.
+    server_version = "keygate-sync"
+    sys_version = ""
     _hits: dict = {}
     _auth_fails: dict = {}
     _hits_lock = threading.Lock()  # ThreadingHTTPServer: dict ops race without it
