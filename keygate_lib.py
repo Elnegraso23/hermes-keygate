@@ -331,6 +331,27 @@ def _secret_to_bytes(s: str) -> bytearray:
     return bytearray(s.encode("utf-8"))
 
 
+SEALED_DB_NAME = "hermes.kdbx.gpg"
+
+
+def sealed_vault_dir(home: Optional[Path] = None) -> Path:
+    """Directorio del vault cifrado en reposo (keygate-vault seal)."""
+    return (home or Path.home()) / ".keygate-vault"
+
+
+def vault_sealed(home: Optional[Path] = None) -> bool:
+    """True cuando existe el vault cifrado en reposo.
+
+    Lo usa el plugin y el sync para NO intentar resolver secretos ni abrir la
+    DB: con el vault sellado los archivos no están, y el agente no puede
+    desbloquearlo (la passphrase la teclea la persona en `keygate-vault open`).
+    """
+    try:
+        return (sealed_vault_dir(home) / SEALED_DB_NAME).is_file()
+    except Exception:
+        return False
+
+
 def db_locked(db: str, keyfile: str) -> bool:
     """Probe with `ls` (fast, non-interactive). Exit != 0 with keyfile-only
     DB almost always means locked/missing, never prompt (stdin is DEVNULL)."""

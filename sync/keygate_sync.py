@@ -1024,6 +1024,7 @@ class Handler(BaseHTTPRequestHandler):
             locked = kg.db_locked(db, kf)
             self._send(200, {"success": True, "ok": True,
                              "locked": locked,
+                             "sealed": kg.vault_sealed(),
                              "entries": 0 if locked else len(kg.list_entries(db, kf)),
                              "setup_required": not password_is_set(self._home())})
             return

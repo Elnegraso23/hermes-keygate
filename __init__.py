@@ -502,6 +502,15 @@ def register(ctx):
             return json.dumps({"success": False, "error": "alias and origin required"})
         cfg = _plug_cfg()
         db, kf = kg.cfg_paths(cfg)
+        if kg.vault_sealed():
+            # Vault cifrado en reposo (keygate-vault seal): el agente NO puede
+            # desbloquearlo — la passphrase la teclea la persona. Error claro y
+            # sin secretos, para que no reintente en bucle.
+            return json.dumps({"success": False, "locked": True,
+                               "error_type": "vault_sealed",
+                               "error": ("vault cifrado en reposo: pide a la persona que "
+                                         "ejecute `scripts/keygate-vault open -- <comando>` "
+                                         "y teclee la passphrase; luego reintenta")})
         if kg.db_locked(db, kf):
             return json.dumps({"success": False, "locked": True,
                                "error_type": "db_locked",
