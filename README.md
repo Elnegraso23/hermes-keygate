@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.15-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.16-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.15) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.6.16) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -125,6 +125,34 @@ contraseña aunque llegue al puerto antes que tú; se borra al crearla.
 Alternativa mismo-PC (sin pagina): abre `~/Documentos/hermes.kdbx` directo en
 KeePassXC con `~/.keepass-agent.key`. La pagina sigue siendo el camino normal —
 un agente que instale esto debe ofrecerla PRIMERO, siempre.
+
+## Relleno automático global (`fill_policy: auto`)
+
+Si no quieres aprobar cada relleno, hay dos caminos y **ninguno borra el
+prompt del código**: se apaga por configuración.
+
+1. **Por cuenta** (recomendado): marcar *"Sin aprobación"* en esa fila de la web.
+   Solo aplica a ese alias y a ese origen exacto.
+2. **Global**: en `~/.hermes/config.yaml`:
+
+```yaml
+secrets:
+  keepass:
+    fill_policy: auto        # por defecto: ask
+```
+
+Con `auto`, el relleno no pide confirmación **pero conserva los cinturones**:
+
+- el origen tiene que ser **idéntico** al guardado en el vault (sigue sin poder
+  rellenar en `evil.com` ni en un subdominio),
+- **rate limit** de 5 rellenos/minuto por alias,
+- queda **auditado** con `approval: "auto-config"` y `policy: "config-auto"`,
+  así se distingue en el log de un relleno aprobado a mano.
+
+Lo que **sí** cambia con `auto`: si un modelo comprometido o una inyección de
+prompt pide rellenar, ya no hay una persona en medio. La barrera que queda es la
+del origen exacto y el techo de frecuencia. Es una decisión de comodidad vs
+superficie de ataque, y por eso viene apagada.
 
 ## Sin aprobación por cuenta (auto-relleno)
 

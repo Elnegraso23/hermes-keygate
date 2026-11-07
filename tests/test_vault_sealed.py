@@ -36,3 +36,20 @@ def test_missing_keyfile_counts_as_locked(tmp_path):
     db = tmp_path / "hermes.kdbx"
     db.write_bytes(b"x")
     assert kg.db_locked(str(db), str(tmp_path / "no-existe.key")) is True
+
+
+# --- política de relleno automático (fill_policy) ---
+
+def test_fill_policy_defaults_to_ask():
+    assert kg.fill_policy_auto({}) is False
+    assert kg.fill_policy_auto({"fill_policy": "ask"}) is False
+
+
+def test_fill_policy_auto_only_when_asked():
+    assert kg.fill_policy_auto({"fill_policy": "auto"}) is True
+    assert kg.fill_policy_auto({"fill_policy": " AUTO "}) is True
+
+
+def test_fill_policy_ignores_garbage():
+    assert kg.fill_policy_auto({"fill_policy": 123}) is False
+    assert kg.fill_policy_auto(None) is False

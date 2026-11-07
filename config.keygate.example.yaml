@@ -11,6 +11,8 @@ approvals:
 
 secrets:
   keepass:
+    fill_policy: ask   # ask (default) | auto (sin prompt, con rate limit y audit)
+  keepass:
     enabled: true
     db_path: "/home/user/Documentos/hermes.kdbx"
     keyfile: "/home/user/.keepass-agent.key"

@@ -550,7 +550,7 @@ def register(ctx):
                                          "run from an interactive CLI/Desktop/Telegram session")})
         leaf_alias = match.split("/")[-1]
         auto = kg.autofill_allows(_home(), leaf_alias, origin)
-        if auto and not kg.autofill_rate_ok(leaf_alias):
+        if (auto or kg.fill_policy_auto(cfg)) and not kg.autofill_rate_ok(leaf_alias):
             # Loop/burn protection: an agent retrying in a cycle must not
             # drain the vault silently. Explicit, auditable refusal.
             kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(leaf_alias),
@@ -560,9 +560,15 @@ def register(ctx):
             return json.dumps({"success": False, "error_type": "alias_auto_rate_limited",
                                "error": ("auto-fill rate limit reached for this alias "
                                          "(max 5/min) — ask the user before retrying")})
+        policy_auto = kg.fill_policy_auto(cfg)
         approval_evidence = {}
         if auto:
             approval_evidence = {"approval": "auto-policy"}
+        elif policy_auto:
+            # fill_policy: auto — sin prompt, pero con las mismas guardas:
+            # origen exacto del vault, rate limit por alias y auditoría con
+            # etiqueta propia para que se vea en el log que fue automático.
+            approval_evidence = {"approval": "auto-config"}
         else:
             try:
                 from tools.approval_prompt import request_elicitation_consent
@@ -615,6 +621,8 @@ def register(ctx):
                      **approval_evidence}
         if auto:
             audit_rec["policy"] = "alias-auto"
+        elif kg.fill_policy_auto(cfg):
+            audit_rec["policy"] = "config-auto"
         kg.audit(_home(), audit_rec)
         out = {"success": bool(filled.get("success")), "filled_fields": filled.get("filled_fields", 0),
                "origin": filled.get("origin", origin), "totp_filled": filled.get("totp_filled", False)}

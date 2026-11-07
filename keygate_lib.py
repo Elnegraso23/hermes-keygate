@@ -730,6 +730,18 @@ def autofill_rate_ok(alias: str) -> bool:
         return True
 
 
+def fill_policy_auto(cfg: dict) -> bool:
+    """¿El usuario pidió relleno sin aprobación para todo? (`fill_policy: auto`)
+
+    Apagado por defecto. Con "auto" el prompt humano desaparece, pero siguen
+    los cinturones: origen exacto del vault, rate limit por alias y auditoría.
+    """
+    try:
+        return str((cfg or {}).get("fill_policy") or "ask").strip().lower() == "auto"
+    except Exception:
+        return False
+
+
 def autofill_allows(home: Path | str, alias: str, origin: str) -> bool:
     norm_req = normalize_origin(origin)
     if not norm_req:
