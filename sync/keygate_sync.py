@@ -69,6 +69,36 @@ def passfile(home: Path) -> Path:
     return home / "keygate-sync-pass"
 
 
+def db_protection(db: str, kf: str) -> dict:
+    """Cómo está protegida la base: sólo keyfile, o keyfile + contraseña.
+
+    Se detecta probando a abrirla SIN contraseña. El servidor nunca maneja la
+    contraseña maestra: la web sólo informa y explica dónde cambiarla.
+    """
+    out = {"mode": "unknown", "label": "desconocido",
+           "can_change_in_web": False,
+           "howto": ("La contraseña maestra se define al crear la base o en "
+                     "KeePassXC: Database > Database Settings > Security > Add password.")}
+    try:
+        p = subprocess.run([kg._kxc(), "ls", "-k", kf, "--no-password", "-q", db],
+                           stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=8)
+    except Exception as exc:
+        out["label"] = f"no se pudo comprobar ({exc.__class__.__name__})"
+        return out
+    if p.returncode == 0:
+        out.update({"mode": "keyfile_only",
+                    "label": "solo keyfile (.key): abre sin contraseña"})
+        return out
+    err = ((p.stderr or "") + (p.stdout or "")).lower()
+    if any(w in err for w in ("password", "credential", "invalid", "clave", "contrase")):
+        out.update({"mode": "keyfile_password",
+                    "label": "keyfile + contraseña maestra"})
+        return out
+    out.update({"mode": "locked", "label": "bloqueada o ilegible en este momento"})
+    return out
+
+
 def hash_pw(password: str, salt: bytes) -> bytes:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PW_ITERS)
 
@@ -388,8 +418,10 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
-<div class="card"><div class="sub" id="checklist">Verificando estado…</div>
-<div class="sub s1">
+<div class="card"><div class="sub" id="checklist">Verificando estado…</div></div>
+<div class="card"><b>Protección de la base</b>
+<div class="sub" id="dbprot">Comprobando…</div></div>
+<div class="card"><div class="sub s1">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
 3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos y URL exacta, guarda.<br>
@@ -659,6 +691,19 @@ async function load() {
   const baks = (b.backups !== undefined) ? `${b.backups} backups` : '';
   const mt = b.db_mtime ? new Date(b.db_mtime * 1000).toLocaleString() : '';
   document.getElementById('dbmeta').textContent = `💾 ${kb}` + (baks ? ` · ${baks}` : '') + (mt ? ` · ${mt}` : '');
+  try {
+    const dp = await api('/api/db-protection');
+    const el = document.getElementById('dbprot');
+    if (el) {
+      const body = dp.body || {};
+      const icon = body.mode === 'keyfile_password' ? '🔐' : (body.mode === 'keyfile_only' ? '🔑' : '⚠️');
+      el.innerHTML = icon + ' ' + (body.label || 'sin datos') +
+        '<br><span class="sub">' + (body.howto || '') + '</span>';
+    }
+  } catch (e) {
+    const el = document.getElementById('dbprot');
+    if (el) el.textContent = 'No se pudo comprobar la protección.';
+  }
   const af = await api('/api/autofill');
   const amap = {};
   ((af.body && af.body.items) || []).forEach(x => { amap[x.alias] = x; });
@@ -1110,6 +1155,9 @@ class Handler(BaseHTTPRequestHandler):
                              "setup_required": not password_is_set(self._home())})
             return
         if not self._need_auth():
+            return
+        if url.path == "/api/db-protection":
+            self._send(200, {"success": True, **db_protection(db, kf)})
             return
         if url.path == "/api/aliases":
             if kg.db_locked(db, kf):

@@ -47,6 +47,9 @@ mkdir -p "$DEST"
 # limpia.
 for f in "$REPO"/*.py; do cp "$f" "$DEST/"; done
 cp "$REPO/plugin.yaml" "$DEST/plugin.yaml"
+rm -rf "$DEST/sync"
+cp -r "$REPO/sync" "$DEST/sync"
+find "$DEST/sync" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
 rm -rf "$DEST/skills"
 cp -r "$REPO/skills" "$DEST/skills"
 find "$DEST/skills" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
@@ -125,7 +128,7 @@ Environment=KEYGATE_DB=$DB
 Environment=KEYGATE_KEYFILE=$KF
 Environment=KEYGATE_BIND=$BIND
 Environment=KEYGATE_PORT=$PORT
-ExecStart=$PY_BIN $REPO/sync/keygate_sync.py
+ExecStart=$PY_BIN $DEST/sync/keygate_sync.py
 Restart=always
 RestartSec=3
 
@@ -149,7 +152,7 @@ else
   # Sin systemd (o falló): proceso en background como antes.
   KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
   KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
-  setsid python3 "$REPO/sync/keygate_sync.py" \
+  setsid python3 "$DEST/sync/keygate_sync.py" \
     >/tmp/keygate-sync.log 2>&1 < /dev/null &
   sleep 2
   if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/"; then
@@ -166,10 +169,10 @@ if [ "${KEYGATE_ALIAS_PAGE:-1}" != "0" ]; then
   PW_FILE="$HOME/.hermes/keygate-alias-page-pass"
   if [ ! -f "$HOME/.hermes/keygate-web.meta.json" ]; then
     if [ -t 0 ]; then
-      python3 "$REPO/keygate_web.py" init || say "(!) sin contrasena de pagina"
+      python3 "$DEST/keygate_web.py" init || say "(!) sin contrasena de pagina"
     else
       TMPPW="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
-      if printf '%s\n' "$TMPPW" | HERMES_HOME="$HOME/.hermes" python3 "$REPO/keygate_web.py" init --from-stdin >/dev/null; then
+      if printf '%s\n' "$TMPPW" | HERMES_HOME="$HOME/.hermes" python3 "$DEST/keygate_web.py" init --from-stdin >/dev/null; then
         printf '%s\n' "$TMPPW" > "$PW_FILE"
         chmod 600 "$PW_FILE"
         say "contrasena de la pagina en $PW_FILE (0600) - cambiala con: python3 $DEST/keygate_web.py set-password"
