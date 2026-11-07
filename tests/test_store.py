@@ -20,10 +20,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import keygate_vault as kv  # noqa: E402
 
+try:  # cryptography es opcional: sólo lo necesita store_mode=mirror
+    import cryptography  # noqa: F401
+    HAVE_CRYPTO = True
+except Exception:
+    HAVE_CRYPTO = False
+
 PASS = "correct horse battery staple"
 SECRET = "DUMMY-SECRET-NOT-REAL"
 
 
+@unittest.skipUnless(HAVE_CRYPTO, "cryptography no instalado (extra opcional)")
 class TestStore(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp()

@@ -71,7 +71,7 @@ jobs:
       - name: Autofill policy tests
         run: python3 -m unittest discover -s tests -p 'test_autofill*.py' -v
       - name: Instalar pytest
-        run: python3 -m pip install -q "pytest==8.4.2"
+        run: python3 -m pip install -q "pytest==8.4.2" cryptography
       - name: Unit tests (origin/IDN, redaction, fill JS, autofill)
         # Desde tests/ a propósito: el __init__.py de la raíz es el plugin e
         # importa el runtime de Hermes, que aquí no está instalado.
