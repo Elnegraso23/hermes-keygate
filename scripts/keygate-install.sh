@@ -142,14 +142,26 @@ UNITEOF
   systemctl --user enable --now keygate-sync.service 2>/dev/null || true
   loginctl enable-linger 2>/dev/null || true
 fi
-if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/" 2>/dev/null; then
-  if [ -f "$UNIT" ]; then
+# Espera activa: `enable --now` vuelve antes de que el socket escuche. Sin
+# esto el curl fallaba, el script arrancaba ADEMÁS un proceso suelto y los dos
+# se peleaban el puerto (systemd en bucle de "Address already in use").
+SYNC_OK=0
+for _ in $(seq 1 25); do
+  sleep 0.4
+  if curl -s -o /dev/null -m 3 "http://$BIND:$PORT/" 2>/dev/null; then SYNC_OK=1; break; fi
+done
+if [ "$SYNC_OK" = 1 ]; then
+  if [ -f "$UNIT" ] && systemctl --user is-active --quiet keygate-sync.service 2>/dev/null; then
     say "keygate-sync vivo (systemd) en http://$BIND:$PORT — sobrevive al cierre del chat"
   else
-    say "keygate-sync vivo (proceso suelto) en http://$BIND:$PORT — morirá con esta sesión"
+    say "keygate-sync vivo en http://$BIND:$PORT"
   fi
+elif [ -f "$UNIT" ]; then
+  # Hay unidad pero no responde: NO arrancamos un segundo server (eso causaba
+  # el conflicto de puerto). Se reporta para que se vea el log.
+  say "(!) keygate-sync con systemd no respondió — journalctl --user -u keygate-sync -n 50"
 else
-  # Sin systemd (o falló): proceso en background como antes.
+  # Sin systemd disponible: proceso en background como antes.
   KEYGATE_DB="$DB" KEYGATE_KEYFILE="$KF" \
   KEYGATE_BIND="$BIND" KEYGATE_PORT="$PORT" \
   setsid python3 "$DEST/sync/keygate_sync.py" \
@@ -158,7 +170,7 @@ else
   if curl -s -o /dev/null -m 5 "http://$BIND:$PORT/"; then
     say "keygate-sync vivo (proceso suelto) en http://$BIND:$PORT (log: /tmp/keygate-sync.log)"
   else
-    say "(!) keygate-sync NO respondió — mira /tmp/keygate-sync.log y journalctl --user -u keygate-sync"
+    say "(!) keygate-sync NO respondió — mira /tmp/keygate-sync.log"
   fi
 fi
 
@@ -244,13 +256,13 @@ fi
 cat <<EOF
 
 == LISTO ==
-Plugin skills: \$DEST/skills/*/SKILL.md
-Vault:        \$DB (keyfile-only) · \$KF (0600)
+Plugin skills: $DEST/skills/*/SKILL.md
+Vault:        $DB · $KF (0600)
 Sync web:     http://$BIND:$PORT  (127.0.0.1 = solo esta máquina; pasá KEYGATE_BIND=<IP Tailscale> para manejarlo desde otro equipo)
 
 Lo que haces ahora:
-1) Abre la URL del sync en tu navegador. La primera vez te obliga a crear una
-   contraseña (mínimo 12). Queda solo en esa pestaña.
+1) Abre la URL del sync y entra con la contraseña ya generada
+   (archivo indicado arriba). No hay código de arranque que copiar.
 2) Tarjeta "Primera vez": descarga el .kdbx y el .key (una sola vez),
    edita en KeePassXC con ese .key, sube el .kdbx editado.
 3) Si querés el login de prueba: https://the-internet.herokuapp.com/login
