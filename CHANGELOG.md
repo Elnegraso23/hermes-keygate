@@ -4,6 +4,15 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.3 — 2026-11-07
+- **`scripts/keygate-uninstall.sh`**: desinstalador completo, espejo del
+  instalador. Inventaría antes de borrar y distingue estado de datos:
+  por defecto quita plugin, servicios y estado y **conserva** base, keyfile y
+  rotaciones; `--purge` borra también esos archivos, el escrow y el perfil del
+  agente. `--dry-run` audita sin tocar nada.
+  Motivo: "borra todo" dejaba las rotaciones `hermes.kdbx.*.bak` en `Documentos`
+  porque no estaban en ninguna lista.
+
 ## 0.7.2 — 2026-11-07
 - **`--no-web-auth`**: instalación completa sin contraseñas de web. Marca
   `keygate-sync-noauth` + `KEYGATE_ALLOW_NOAUTH=1` y levanta también la página

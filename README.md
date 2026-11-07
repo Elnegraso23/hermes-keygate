@@ -309,6 +309,26 @@ Reglas que sostienen el patrón:
 - La contraseña del sync y el `.key` **nunca por Telegram/chat**: quedan en
   historial y servidores de la plataforma.
 
+## Desinstalar (espejo exacto del instalador)
+
+```bash
+bash scripts/keygate-uninstall.sh --dry-run          # ver qué haría, sin tocar nada
+bash scripts/keygate-uninstall.sh                    # quita plugin/servicios/estado
+bash scripts/keygate-uninstall.sh --purge            # + base, keyfile y TODAS las rotaciones
+```
+
+Sin `--purge` **conserva tus datos**: `hermes.kdbx`, la keyfile y los `*.bak` de
+rotación que el sync deja en `Documentos`. Con `--purge` los enumera uno por uno
+y los borra, junto con el escrow (`~/.keygate-vault`) y el perfil del agente
+(`~/.config/keepassxc-agent.ini`).
+
+Por qué existe: el desinstalador previo era una lista mental. Se olvidó de las
+rotaciones del `.kdbx` en `Documentos`, así que "borra todo" dejaba copias de la
+bóveda atrás. El script ahora inventaría y borra en el mismo orden en que el
+instalador crea.
+
+`--dry-run` con `--purge` es la forma de auditar antes de un borrado real.
+
 ## Regenerar el vault (corrupto, viejo, o empezar de cero)
 
 ```bash
