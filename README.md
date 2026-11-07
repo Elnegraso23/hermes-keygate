@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.10-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.11-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.10) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.6.11) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -542,6 +542,32 @@ deja crear otra. Nunca por chat.
   con cuenta real con 2FA.
 - `fetch()` de SecretSource solo hidrata refs `kpx://` que mapees: no mapees
   todo el vault, solo API keys necesarias.
+
+## Modo escrow: la keyfile fuera del equipo
+
+El vault operativo es *keyfile-only*: si el `.kdbx` y el `.key` están juntos en
+disco, quien tenga acceso físico o root tiene el vault abierto. El modo escrow
+rompe eso: el `.key` queda **cifrado con passphrase (AES-256, gpg)** y fuera del
+equipo (nube, otro host, USB); solo se descifra **en tmpfs** cuando hace falta y
+se destruye al terminar el comando.
+
+```bash
+# 1) una vez: cifrar la keyfile (passphrase por teclado, no va al historial)
+scripts/keygate-unlock --seal ~/.keepass-agent.key -o agent.key.gpg
+#    súbelo a tu nube (Drive/WebDAV/Objeto) y borra el original
+
+# 2) cada sesión: traer, usar, destruir
+scripts/keygate-unlock --from "rclone cat gdrive:keygate/agent.key.gpg" -- hermes chat
+scripts/keygate-unlock --file ~/agent.key.gpg --ttl 900 -- python3 mi-script.py
+```
+
+Qué garantiza: el `.key` **nunca toca el disco** (vive en `/dev/shm`, 0700/0600),
+se borra con `shred` al salir o al vencer el `--ttl`, y la passphrase se pide por
+TTY y se pasa a gpg por descriptor de fichero (no por `argv`, no queda en
+`ps` ni en el historial). Qué **no** garantiza: si tecleas la passphrase en un
+host ya comprometido, root puede leerla de la memoria del proceso; y mientras el
+comando corre, la keyfile existe en RAM. Es un control contra robo del disco o
+de la copia en reposo, no contra un root activo.
 
 ## Licencia
 

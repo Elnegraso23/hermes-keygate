@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# keygate-unlock — materializa la keyfile del vault SOLO durante la ejecución de
+# un comando, en tmpfs (RAM), y la destruye al terminar.
+#
+# Por qué: si el .kdbx y el .key viven juntos en disco, cualquiera con acceso
+# físico o root tiene el vault abierto. Aquí la keyfile vive cifrada fuera del
+# equipo (nube, otro host, USB) y solo se descifra en RAM cuando hace falta.
+#
+# Uso:
+#   keygate-unlock --from "rclone cat gdrive:keygate/agent.key.gpg" -- hermes chat
+#   keygate-unlock --file ~/agent.key.gpg --ttl 600 -- python3 script.py
+#   keygate-unlock --seal ~/.keepass-agent.key -o agent.key.gpg   # crear el blob
+#
+# La passphrase se pide por TTY (nunca por argv, nunca en el historial) y se
+# pasa a gpg por un descriptor de fichero.
+set -euo pipefail
+
+PROG="$(basename "$0")"
+TTL=0
+SRC_FILE=""
+SRC_CMD=""
+MODE="run"
+SEAL_IN=""
+SEAL_OUT=""
+KEY_NAME="key"
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+
+usage() {
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --file) SRC_FILE="$2"; shift 2 ;;
+    --from) SRC_CMD="$2"; shift 2 ;;
+    --ttl)  TTL="$2"; shift 2 ;;
+    --seal) MODE="seal"; SEAL_IN="$2"; shift 2 ;;
+    -o|--out) SEAL_OUT="$2"; shift 2 ;;
+    -h|--help) usage 0 ;;
+    --) shift; break ;;
+    *) die "argumento no reconocido: $1 (usa --help)" ;;
+  esac
+done
+
+# ---------------------------------------------------------------- sellar -----
+if [ "$MODE" = "seal" ]; then
+  [ -n "$SEAL_IN" ] && [ -f "$SEAL_IN" ] || die "--seal necesita un fichero existente"
+  [ -n "$SEAL_OUT" ] || SEAL_OUT="${SEAL_IN}.gpg"
+  [ -e "$SEAL_OUT" ] && die "$SEAL_OUT ya existe (no lo sobrescribo)"
+  command -v gpg >/dev/null || die "falta gpg"
+  printf '%s: cifrando %s -> %s (AES-256, passphrase por TTY)\n' "$PROG" "$SEAL_IN" "$SEAL_OUT" >&2
+  gpg --batch --yes --symmetric --cipher-algo AES256 --s2k-mode 3 --s2k-count 65011712 \
+      --pinentry-mode loopback --passphrase-fd 3 -o "$SEAL_OUT" "$SEAL_IN" 3<&0
+  chmod 600 "$SEAL_OUT"
+  printf '%s: listo. Súbelo a tu nube (o USB) y borra el original si quieres.\n' "$PROG" >&2
+  exit 0
+fi
+
+[ $# -gt 0 ] || die "falta el comando a ejecutar (usa -- <cmd> [args...])"
+[ -n "$SRC_FILE" ] || [ -n "$SRC_CMD" ] || die "indica --file o --from"
+command -v gpg >/dev/null || die "falta gpg"
+
+# ------------------------------------------------------- espacio cerrado -----
+SHM="${KEYGATE_SHM:-/dev/shm}"
+[ -d "$SHM" ] || die "$SHM no existe (necesito tmpfs para no tocar disco)"
+WORK="$(mktemp -d "$SHM/keygate.XXXXXXXX")" || die "no pude crear el directorio temporal"
+chmod 700 "$WORK"
+KEYPATH="$WORK/$KEY_NAME"
+
+cleanup() {
+  set +e
+  [ -f "$KEYPATH" ] && shred -u -n 1 "$KEYPATH" 2>/dev/null
+  # cualquier resto dentro del directorio (kdbx temporal, sockets, etc.)
+  find "$WORK" -mindepth 1 -maxdepth 1 -type f -exec shred -u -n 1 {} \; 2>/dev/null
+  rm -rf "$WORK" 2>/dev/null
+  unset KEYGATE_KEYFILE 2>/dev/null
+}
+trap cleanup EXIT INT TERM HUP
+
+# vigilante: si el proceso se cuelga, la key no sobrevive al TTL
+if [ "$TTL" -gt 0 ]; then
+  ( sleep "$TTL"; [ -d "$WORK" ] && { printf '%s: TTL %ss agotado, destruyendo keyfile\n' "$PROG" "$TTL" >&2; cleanup; } ) &
+  WATCH=$!
+  trap 'kill $WATCH 2>/dev/null; cleanup' EXIT
+fi
+
+# ------------------------------------------------------------- descifrar -----
+read -r -s -p "Passphrase de la keyfile: " PASSPHRASE; echo >&2
+[ -n "$PASSPHRASE" ] || die "passphrase vacía"
+
+if [ -n "$SRC_FILE" ]; then
+  [ -r "$SRC_FILE" ] || die "no puedo leer $SRC_FILE"
+  gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 -d \
+      -o "$KEYPATH" "$SRC_FILE" 3< <(printf '%s' "$PASSPHRASE")
+else
+  gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 -d \
+      -o "$KEYPATH" 3< <(printf '%s' "$PASSPHRASE") < <(bash -c "$SRC_CMD")
+fi
+unset PASSPHRASE
+chmod 600 "$KEYPATH"
+[ -s "$KEYPATH" ] || die "la keyfile descifrada está vacía"
+
+printf '%s: keyfile en %s (tmpfs, 0600) — ejecutando: %s\n' "$PROG" "$KEYPATH" "$*" >&2
+KEYGATE_KEYFILE="$KEYPATH" KEYGATE_EPHEMERAL_KEY=1 "$@"
+RC=$?
+printf '%s: comando terminó con %s; destruyendo keyfile\n' "$PROG" "$RC" >&2
+exit "$RC"

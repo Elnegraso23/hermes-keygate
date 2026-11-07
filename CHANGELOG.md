@@ -4,6 +4,16 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.11 — 2026-11-07
+- **`scripts/keygate-unlock` — modo escrow de la keyfile**: la `.key` se guarda
+  cifrada con gpg (AES-256) fuera del equipo y solo se materializa en tmpfs
+  (`/dev/shm`, 0700, 0600) durante el comando que la necesita; al salir o al
+  vencer `--ttl` se borra con `shred`. Passphrase por TTY, pasada a gpg por
+  descriptor (nunca por argv). `--seal` produce el blob para subir a cualquier
+  nube/USB; `--from CMD` permite traerlo con `rclone cat`, `curl`, etc.
+- CI: sintaxis de los scripts nuevos + prueba de humo del escrow (hash idéntico
+  tras descifrar en tmpfs y rechazo de passphrase incorrecta).
+
 ## 0.6.10 — 2026-11-07
 - **Icono propio**: `/favicon.svg` (escudo con ojo de cerradura, degradado
   azul→verde) servido por el propio sync con `img-src 'self'`, más el mismo

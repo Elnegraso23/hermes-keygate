@@ -49,10 +49,25 @@ jobs:
           echo "compila OK"
       - name: Bash sintaxis de los scripts
         run: |
-          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull; do
+          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull scripts/keygate-test scripts/keygate-unlock; do
             bash -n "$f" || exit 1
           done
           echo "scripts OK"
+      - name: "Escrow de keyfile (gpg): sellar, descifrar en tmpfs, borrar"
+        run: |
+          set -euo pipefail
+          T="$(mktemp -d)"
+          head -c 64 /dev/urandom > "$T/k"
+          H1="$(sha256sum "$T/k" | cut -d' ' -f1)"
+          printf 'pw-de-ci-123456\n' | bash scripts/keygate-unlock --seal "$T/k" -o "$T/k.gpg"
+          rm -f "$T/k"
+          H2="$(printf 'pw-de-ci-123456\n' | KEYGATE_SHM="$(mktemp -d)" bash scripts/keygate-unlock --file "$T/k.gpg" -- sh -c 'sha256sum "$KEYGATE_KEYFILE"' | cut -d' ' -f1)"
+          [ "$H1" = "$H2" ] && echo "escrow ok: hash identico tras descifrar en tmpfs"
+          if printf 'mala\n' | bash scripts/keygate-unlock --file "$T/k.gpg" -- true; then
+            echo "ERROR: acepto una passphrase incorrecta"; exit 1
+          else
+            echo "passphrase incorrecta rechazada"
+          fi
       - name: Autofill policy tests
         run: python3 -m unittest discover -s tests -p 'test_autofill*.py' -v
       - name: Instalar pytest
