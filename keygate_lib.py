@@ -752,3 +752,83 @@ if __name__ == "__main__":
         raise SystemExit(0)
     print("uso: python3 keygate_lib.py --doctor", file=sys.stderr)
     raise SystemExit(2)
+
+
+# ------------------------------------------------- vault desbloqueado (live) ---
+# Modo "remote unlock" opcional: el sync descifra el vault sellado a tmpfs y
+# deja las rutas + caducidad en un estado JSON 0600. El plugin lo lee aquí para
+# usar esas rutas mientras la sesión siga viva. Sin estado, el vault sigue
+# sellado (fail-closed).
+
+LIVE_STATE_NAME = "keygate-live.json"
+
+
+def live_state_path(home: Optional[Path] = None) -> Path:
+    return (home or (Path.home() / ".hermes")) / LIVE_STATE_NAME
+
+
+def live_paths(home: Optional[Path] = None):
+    """(db, keyfile) de la sesión desbloqueada, o None si no hay o caducó."""
+    try:
+        d = json.loads(live_state_path(home).read_text())
+        exp = float(d.get("exp") or 0)
+        db, kf = str(d.get("db") or ""), str(d.get("key") or "")
+        if not db or not kf or exp <= time.time():
+            return None
+        if not (Path(db).is_file() and Path(kf).is_file()):
+            return None
+        return db, kf
+    except Exception:
+        return None
+
+
+def live_set(db: str, keyfile: str, ttl_seconds: int, home: Optional[Path] = None) -> float:
+    """Registra la sesión desbloqueada y devuelve el epoch de caducidad."""
+    exp = time.time() + int(ttl_seconds)
+    p = live_state_path(home)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"db": db, "key": keyfile, "exp": exp}, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, p)
+    return exp
+
+
+def live_state_exp(home: Optional[Path] = None) -> float:
+    """Epoch de caducidad de la sesión desbloqueada (0 si no hay)."""
+    try:
+        return float(json.loads(live_state_path(home).read_text()).get("exp") or 0)
+    except Exception:
+        return 0.0
+
+
+def live_clear(home: Optional[Path] = None) -> None:
+    try:
+        live_state_path(home).unlink()
+    except Exception:
+        pass
+
+
+def live_shred(home: Optional[Path] = None) -> None:
+    """Borra los archivos del vault temporal y el estado."""
+    try:
+        d = json.loads(live_state_path(home).read_text())
+    except Exception:
+        d = {}
+    for k in ("db", "key"):
+        f = Path(str(d.get(k) or ""))
+        try:
+            if f.is_file():
+                f.unlink()
+        except Exception:
+            pass
+    for k in ("db", "key"):
+        f = Path(str(d.get(k) or ""))
+        try:
+            f.parent.rmdir()
+        except Exception:
+            pass
+    live_clear(home)

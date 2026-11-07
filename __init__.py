@@ -502,7 +502,12 @@ def register(ctx):
             return json.dumps({"success": False, "error": "alias and origin required"})
         cfg = _plug_cfg()
         db, kf = kg.cfg_paths(cfg)
-        if kg.vault_sealed():
+        live = kg.live_paths()
+        if live:
+            # Sesión desbloqueada por el panel (modo remote): el sync dejó el
+            # vault descifrado en tmpfs y su caducidad en el estado.
+            db, kf = live
+        elif kg.vault_sealed():
             # Vault cifrado en reposo (keygate-vault seal): el agente NO puede
             # desbloquearlo — la passphrase la teclea la persona. Error claro y
             # sin secretos, para que no reintente en bucle.

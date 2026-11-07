@@ -801,6 +801,81 @@ def _build_allowed_hosts(bind: str, port: int) -> set:
     return hosts
 
 
+# ------------------------------------------------ desbloqueo remoto (opt-in) ---
+# Modo opcional: el panel descifra el vault sellado a tmpfs y abre una sesión
+# con TTL. Apagado por defecto (KEYGATE_UNLOCK=remote lo habilita).
+# Aviso honesto: mientras la sesión vive, la DB está en RAM y el agente puede
+# usarla. El TTL y /api/lock existen para acortar esa ventana.
+
+def unlock_mode() -> str:
+    return (os.environ.get("KEYGATE_UNLOCK") or "off").strip().lower()
+
+
+def unlock_ttl_seconds() -> int:
+    try:
+        return max(60, int(os.environ.get("KEYGATE_UNLOCK_TTL", "3600")))
+    except ValueError:
+        return 3600
+
+
+def _gpg_decrypt(blob: Path, out: Path, passphrase: str) -> bool:
+    """Descifra con gpg; la passphrase va por stdin (nunca por argv)."""
+    try:
+        p = subprocess.run(
+            ["gpg", "--batch", "--yes", "--quiet", "--pinentry-mode", "loopback",
+             "--passphrase-fd", "0", "-d", "-o", str(out), str(blob)],
+            input=passphrase.encode("utf-8"), stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, timeout=60, check=False)
+        return p.returncode == 0 and out.is_file() and out.stat().st_size > 0
+    except Exception:
+        return False
+
+
+def unlock_vault(passphrase: str) -> tuple:
+    """Descifra DB+key a tmpfs. Devuelve (ok, error, exp)."""
+    vdir = kg.sealed_vault_dir()
+    db_blob = vdir / kg.SEALED_DB_NAME
+    key_blob = vdir / "agent.key.gpg"
+    if not db_blob.is_file() or not key_blob.is_file():
+        return False, "vault not sealed", 0
+    shm = Path(os.environ.get("KEYGATE_SHM", "/dev/shm"))
+    try:
+        work = Path(tempfile.mkdtemp(prefix="keygate-live.", dir=str(shm)))
+        os.chmod(work, 0o700)
+    except Exception:
+        return False, "no tmpfs available", 0
+    db_tmp, key_tmp = work / "hermes.kdbx", work / "agent.key"
+    if not _gpg_decrypt(db_blob, db_tmp, passphrase):
+        try:
+            work.rmdir()
+        except Exception:
+            pass
+        return False, "wrong passphrase", 0
+    if not _gpg_decrypt(key_blob, key_tmp, passphrase):
+        for f in (db_tmp, key_tmp):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+        try:
+            work.rmdir()
+        except Exception:
+            pass
+        return False, "wrong passphrase", 0
+    for f in (db_tmp, key_tmp):
+        os.chmod(f, 0o600)
+    exp = kg.live_set(str(db_tmp), str(key_tmp), unlock_ttl_seconds())
+    return True, "", exp
+
+
+def schedule_autolock(seconds: int) -> None:
+    def _fire():
+        kg.live_shred()
+    t = threading.Timer(max(1, int(seconds)), _fire)
+    t.daemon = True
+    t.start()
+
+
 class Handler(BaseHTTPRequestHandler):
     # Sin versión en la cabecera Server: ZAP lo marca como fuga de información
     # y a un atacante le ahorra fingerprinting. sys_version vacío evita el
@@ -1022,9 +1097,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
             locked = kg.db_locked(db, kf)
+            live = kg.live_paths()
             self._send(200, {"success": True, "ok": True,
                              "locked": locked,
                              "sealed": kg.vault_sealed(),
+                             "unlock_mode": unlock_mode(),
+                             "unlocked": bool(live),
+                             "unlock_exp": (kg.live_state_exp() if live else 0),
                              "entries": 0 if locked else len(kg.list_entries(db, kf)),
                              "setup_required": not password_is_set(self._home())})
             return
@@ -1228,6 +1307,46 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"success": True})
             return
         if not self._need_auth():
+            return
+        if url.path == "/api/unlock":
+            # Opt-in (KEYGATE_UNLOCK=remote). Requiere sesión web + CSRF y la
+            # passphrase del vault. La passphrase no se guarda ni se audita.
+            if unlock_mode() != "remote":
+                self._send(404, {"success": False, "error": "unlock mode disabled"})
+                return
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
+            if length <= 0 or length > 4096:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                j = json.loads(self.rfile.read(length).decode())
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            passphrase = str(j.get("passphrase") or "")
+            if not passphrase:
+                self._send(400, {"success": False, "error": "passphrase required"})
+                return
+            ok, err, exp = unlock_vault(passphrase)
+            if not ok:
+                audit_ev(self._home(), {"ev": "vault", "action": "unlock-denied",
+                                        "reason": err})
+                self._send(401, {"success": False, "error": err})
+                return
+            schedule_autolock(int(exp - time.time()))
+            audit_ev(self._home(), {"ev": "vault", "action": "unlocked",
+                                    "ttl": unlock_ttl_seconds()})
+            self._send(200, {"success": True, "unlocked": True,
+                             "exp": int(exp), "ttl": unlock_ttl_seconds()})
+            return
+        if url.path == "/api/lock":
+            if not self._csrf_ok(want_json=True):
+                return
+            kg.live_shred()
+            audit_ev(self._home(), {"ev": "vault", "action": "locked"})
+            self._send(200, {"success": True, "unlocked": False})
             return
         if url.path == "/api/reset-password":
             # Change the web password. Requires the CURRENT one (proves

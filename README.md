@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.14-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.15-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.14) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.6.15) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -591,6 +591,42 @@ que estamos evitando.
 
 `seal` **no borra nada**: imprime el `shred -u` que debes ejecutar tú cuando
 confirmes que `open` abre tu base.
+
+## Modos de desbloqueo (opcional, se activan por configuración)
+
+El vault puede quedarse como está (keyfile en disco) o endurecerse. Nada de
+esto es obligatorio: por defecto **todo está apagado** y el plugin se comporta
+igual que siempre.
+
+| Modo | Cómo se activa | Qué hace | ¿Frena a root? |
+|---|---|---|---|
+| `off` (por defecto) | nada | keyfile en disco, como hasta ahora | no |
+| `local` | `scripts/keygate-vault seal` | cifra DB+key con passphrase; se abren en tmpfs por comando | sí, en reposo |
+| `remote` | `KEYGATE_UNLOCK=remote` en el servicio + vault sellado | el panel descifra a tmpfs y abre sesión con TTL; `POST /api/unlock {passphrase}`, `POST /api/lock` | sí, en reposo |
+| `totp` *(roadmap)* | — | código de 6 dígitos del autenticador como segundo factor del modo remote | no añade |
+| `webauthn` *(roadmap)* | — | passkey con Face ID: llave en el Secure Enclave del móvil/tableta | sí, incluso con root |
+
+Detalles del modo `remote`:
+
+```bash
+KEYGATE_UNLOCK=remote KEYGATE_UNLOCK_TTL=3600 hermes ... # arranca el sync así
+curl -X POST https://<host>:8472/api/unlock -H "Authorization: Bearer <pass-web>" \
+     -H "Content-Type: application/json" -H "Origin: http://<host>:8472" \
+     -d '{"passphrase":"..."}'      # abre la sesión
+curl -X POST https://<host>:8472/api/lock -H "Authorization: Bearer <pass-web>" ...  # la cierra
+```
+
+- La passphrase va por cuerpo y **nunca** se guarda, ni en logs ni en la
+  auditoría (solo se registra `unlocked` / `unlocked-denied` / `locked`).
+- Mientras la sesión vive, la DB está en **tmpfs** y el agente puede usarla;
+  `/api/health` expone `unlocked`, `unlock_exp` y `unlock_mode`.
+- El TTL la cierra sola (`KEYGATE_UNLOCK_TTL`, por defecto 3600 s).
+- Hace falta la contraseña web **y** la passphrase del vault: dos factores.
+
+Lo que los modos `totp` y `webauthn` **no** están implementados todavía: son la
+hoja de ruta, no una promesa. `webauthn` exige HTTPS con certificado válido y
+verificación de firmas ES256; `totp` es más barato pero necesita un secreto en
+el host.
 
 ## Licencia
 
