@@ -60,6 +60,17 @@ if [ -f "$DB" ]; then
     echo "-- DB anterior movida a $(basename "$DB").corrupt-$STAMP (no se borró nada; la rotación *.bak no lo toca)"
   else
     echo "-- operative DB exists: $DB (usá --force para reemplazarla con respaldo)"
+    # Estado de protección, sin preguntar: una DB existente no se puede
+    # re-cifrar desde keepassxc-cli (eso se hace en la GUI).
+    if timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" >/dev/null 2>&1; then
+      echo "--   protección actual: SOLO keyfile (.key) — abre sin contraseña"
+      echo "--   ¿querés exigir además contraseña maestra? abrí la DB en KeePassXC:"
+      echo "--     Database > Database Settings > Security > Add password"
+      echo "--   (keepassxc-cli no puede añadir contraseña a una DB ya creada)"
+    else
+      echo "--   protección actual: keyfile + CONTRASEÑA maestra"
+      echo "--   lecturas no interactivas: exportá KEYGATE_DB_PASSWORD en el entorno"
+    fi
     exit 0
   fi
 fi
