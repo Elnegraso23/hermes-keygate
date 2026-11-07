@@ -283,11 +283,14 @@ def serve(bind: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
 def _cli(argv) -> int:
     cmd = argv[1] if len(argv) > 1 else "help"
     if cmd in ("init", "set-password"):
-        from getpass import getpass
-        pw = getpass("keygate web password: ")
-        if pw != getpass("confirm: "):
-            print("mismatch")
-            return 2
+        if "--from-stdin" in argv:  # instalación desatendida: nunca por argv
+            pw = sys.stdin.readline().strip()
+        else:
+            from getpass import getpass
+            pw = getpass("keygate web password: ")
+            if pw != getpass("confirm: "):
+                print("mismatch")
+                return 2
         if len(pw) < 10:
             print("password too short (10+ chars)")
             return 2
