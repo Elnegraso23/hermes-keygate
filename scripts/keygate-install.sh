@@ -174,25 +174,30 @@ else
   fi
 fi
 
-# 5b. Paridad terminal ↔ web: la contraseña de la web se crea aquí, no en el
-# navegador. Así no hace falta copiar el código de un solo uso desde la consola
-# para reclamar la primera visita; el código sigue existiendo para acceso
-# remoto, pero una instalación local ya deja la web lista para entrar.
-SYNC_PW_FILE="$HOME/.hermes/keygate-web-pass"
+# 5b. Contraseña de la web: la DEFINE el usuario, no se inventa.
+# Con terminal se pide aquí (dos veces, sin eco, nunca a un archivo). Sin
+# terminal NO se crea: la primera visita a la web la pide, con el código de un
+# solo uso que imprime el servidor.
 if [ ! -f "$HOME/.hermes/keygate-sync-pass" ]; then
-  SYNC_PW="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
-  DEST_SYNC="$DEST/sync" HH="$HOME/.hermes" KEYGATE_SYNC_PW="$SYNC_PW" python3 - <<'PYEOF'
-import os, pathlib, sys
+  if [ -t 0 ]; then
+    DEST_SYNC="$DEST/sync" HH="$HOME/.hermes" python3 - <<'PYEOF'
+import getpass, os, pathlib, sys
 sys.path.insert(0, os.environ["DEST_SYNC"])
 import keygate_sync as ks
-ok = ks.set_password_once(pathlib.Path(os.environ["HH"]), os.environ["KEYGATE_SYNC_PW"])
-print("sync-pw:" + ("ok" if ok else "no"))
+pw = getpass.getpass("Contraseña para entrar a la web keygate (min 12): ")
+if pw != getpass.getpass("Repítela: "):
+    print("  (!) no coinciden: la web te la pedirá en la primera visita")
+    raise SystemExit(0)
+if len(pw) < 12:
+    print("  (!) menos de 12 caracteres: la web te la pedirá en la primera visita")
+    raise SystemExit(0)
+ok = ks.set_password_once(pathlib.Path(os.environ["HH"]), pw)
+print("  contraseña de la web: " + ("definida" if ok else "ya existía"))
 PYEOF
-  printf '%s\n' "$SYNC_PW" > "$SYNC_PW_FILE"
-  chmod 600 "$SYNC_PW_FILE"
-  rm -f "$HOME/.hermes/keygate-sync-bootstrap"
-  unset SYNC_PW
-  say "contraseña de la web (sync) en $SYNC_PW_FILE (0600) — código de un solo uso ya no hace falta"
+  else
+    say "sin terminal: la contraseña de la web se define en la primera visita"
+    say "el código de un solo uso está en $HOME/.hermes/keygate-sync-bootstrap"
+  fi
 fi
 
 # 6. Página de alias (keygate_link). Opt-out con KEYGATE_ALIAS_PAGE=0.
