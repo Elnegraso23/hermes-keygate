@@ -4,6 +4,35 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.0 — 2026-11-07
+- **Contraseña maestra opcional en la base operativa** (`hermes.kdbx`). Hoy la
+  DB abre sólo con la keyfile; en la instalación `scripts/keygate-setup` ahora
+  pregunta: *solo keyfile* (default, sin prompt) o *keyfile + contraseña*. La
+  contraseña viaja **sólo por stdin** (`KEYGATE_DB_PASSWORD`), nunca por argv ni
+  por el chat; `keepassxc-cli` deja de recibir `--no-password` en ese modo
+  (`kg.kxc_auth()`), así que una DB protegida no se abre por accidente.
+- **keygate deja de escribir en el vault nativo de Hermes por defecto**
+  (`vault_sync: false`). `keygate_import` sólo registra un puntero sin secretos
+  (origen → alias) en `keygate-index.json` (0600). El espejo al vault de Hermes
+  queda como opt-in explícito (`vault_sync: true` / `KEYGATE_VAULT_SYNC=1`).
+- **`keygate_lookup(origin)`** (nueva tool): resuelve página → alias en una sola
+  llamada y dice si hay auto-fill (o sea, si habrá prompt de aprobación). Match
+  de origen exacto: distinto esquema, sufijo y prefijo fallan.
+- **`keygate_link(alias)` + `scripts/keygate-alias-page`** (nuevo): página de
+  alias con Basic auth (PBKDF2-SHA256; la contraseña de la página no se toca) y
+  CSP sin `script-src`. Hermes manda el link en vez de pedir aprobación en cada
+  login; activar auto-fill ahí la elimina. La página nunca muestra ni acepta
+  contraseñas de sitios.
+- **`scripts/keygate-store` + `keygate_vault.py`** (nuevo, opcional): base propia
+  de keygate para `store_mode: mirror` — llave local (0600) o llave + contraseña
+  con scrypt (N=32768). En modo passphrase no queda archivo de llave y el
+  descifrado se cachea sólo en memoria (15 min). El default sigue siendo
+  `store_mode: live`: cero copias, todo se resuelve desde `hermes.kdbx`.
+- Tests nuevos: índice sin secretos, contraseña de la página, toggles de
+  auto-fill, store con/sin passphrase, y DB real con keyfile+contraseña
+  (rechaza `--no-password`, rechaza contraseña incorrecta, abre por stdin).
+- CI: compila `keygate_web.py`/`keygate_vault.py` y valida `scripts/keygate-store`.
+
 ## 0.6.12 — 2026-11-07
 - **`scripts/keygate-vault` — cifrado en reposo de SOLO los dos archivos**: la
   DB y la keyfile se guardan como `hermes.kdbx.gpg` + `agent.key.gpg`

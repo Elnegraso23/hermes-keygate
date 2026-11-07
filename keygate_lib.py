@@ -301,12 +301,46 @@ def _kxc() -> str:
     return _resolve_kxc_bin()
 
 
-def _run_kxc(args: List[str]) -> subprocess.CompletedProcess:
-    """argv-only, stdin closed, stderr discarded (may carry secrets)."""
+DB_PASSWORD_ENV = "KEYGATE_DB_PASSWORD"
+
+
+def db_uses_password() -> bool:
+    """Is a master password configured for the operative DB?
+
+    Signalled by KEYGATE_DB_PASSWORD being present (even empty != unset is not
+    honoured: an empty value is treated as absent, so fail-closed). The value
+    is never accepted as an argv element, only through stdin.
+    """
+    return bool(os.environ.get(DB_PASSWORD_ENV))
+
+
+def kxc_auth(keyfile: str) -> List[str]:
+    """Credential flags for keepassxc-cli.
+
+    Keyfile-only DBs use ``--no-password`` (the historical, prompt-free path).
+    DBs created with a master password must NOT pass ``--no-password``: the
+    password goes to the CLI through stdin via ``_run_kxc``.
+    """
+    if db_uses_password():
+        return ["-k", keyfile]
+    return ["-k", keyfile, "--no-password"]
+
+
+def _run_kxc(args: List[str], stdin_data: Optional[str] = None) -> subprocess.CompletedProcess:
+    """argv-only, stderr discarded (may carry secrets).
+
+    stdin carries the DB master password when KEYGATE_DB_PASSWORD is set; it is
+    never placed in argv (visible in /proc/<pid>/cmdline to other processes).
+    """
+    feed = stdin_data
+    if feed is None and db_uses_password():
+        feed = os.environ.get(DB_PASSWORD_ENV, "") + "\n"
     try:
         return subprocess.run(
             [_kxc(), *args],
-            env=_child_env(), stdin=subprocess.DEVNULL,
+            env=_child_env(),
+            input=feed if feed is not None else None,
+            stdin=subprocess.DEVNULL if feed is None else None,
             capture_output=True, text=True, encoding="utf-8",
             errors="replace", timeout=TIMEOUT,
         )
@@ -356,7 +390,7 @@ def db_locked(db: str, keyfile: str) -> bool:
     """Probe with `ls` (fast, non-interactive). Exit != 0 with keyfile-only
     DB almost always means locked/missing, never prompt (stdin is DEVNULL)."""
     try:
-        p = _run_kxc(["ls", "-k", keyfile, "--no-password", "-q", "--", db])
+        p = _run_kxc(["ls", *kxc_auth(keyfile), "-q", "--", db])
     except Exception:
         return True
     return p.returncode != 0
@@ -364,7 +398,7 @@ def db_locked(db: str, keyfile: str) -> bool:
 
 def list_entries(db: str, keyfile: str) -> List[str]:
     """Entry paths (titles/groups), metadata only. Empty when locked."""
-    p = _run_kxc(["ls", "-R", "-k", keyfile, "--no-password", "-q", "--", db])
+    p = _run_kxc(["ls", "-R", *kxc_auth(keyfile), "-q", "--", db])
     if p.returncode != 0:
         return []
     out = []
@@ -413,13 +447,13 @@ def resolve_entry(db: str, keyfile: str, alias: str) -> Tuple[Optional[str], Opt
 def show_field(db: str, keyfile: str, entry: str, field: str) -> Optional[str]:
     """Resolve ONE field server-side. field in {password, username, totp, url}."""
     if field == "totp":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-t", "-s", "--", db, entry]
+        args = ["show", *kxc_auth(keyfile), "-q", "-t", "-s", "--", db, entry]
     elif field == "password":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-s", "-a", "Password", "--", db, entry]
+        args = ["show", *kxc_auth(keyfile), "-q", "-s", "-a", "Password", "--", db, entry]
     elif field == "username":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "UserName", "--", db, entry]
+        args = ["show", *kxc_auth(keyfile), "-q", "-a", "UserName", "--", db, entry]
     elif field == "url":
-        args = ["show", "-k", keyfile, "--no-password", "-q", "-a", "URL", "--", db, entry]
+        args = ["show", *kxc_auth(keyfile), "-q", "-a", "URL", "--", db, entry]
     else:
         return None
     try:
@@ -706,6 +740,74 @@ AUTO_FILL_MAX = 5          # fills per alias per window under alias-auto
 AUTO_FILL_WINDOW = 60.0
 _auto_hits: Dict[str, List[float]] = {}
 _auto_lock = threading.Lock()
+
+
+def index_path(home: Path | str) -> Path:
+    """Secret-free pointer table: origin -> alias.
+
+    Lets Hermes resolve a page to its alias in ONE call without touching the
+    native Hermes vault. Contains no passwords and no identifiers.
+    """
+    h = Path(home) if isinstance(home, (str, Path)) else Path.home() / ".hermes"
+    return h / "keygate-index.json"
+
+
+def load_index(home: Path | str) -> dict:
+    fp = index_path(home)
+    try:
+        if fp.exists():
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "aliases" in data:
+                return data
+    except Exception:
+        pass
+    return {"version": 1, "aliases": {}}
+
+
+def save_index(home: Path | str, data: dict) -> None:
+    fp = index_path(home)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=str(fp.parent),
+            prefix=".keygate-index-", suffix=".tmp", delete=False
+        ) as tf:
+            tmp_name = tf.name
+            json.dump(data, tf, ensure_ascii=False, indent=2, sort_keys=True)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, fp)
+    except Exception:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink()
+            except Exception:
+                pass
+        raise
+
+
+def index_put(home: Path | str, alias: str, origin: str) -> dict:
+    """Record origin -> alias. Never stores a secret or an identifier."""
+    with _AUTOFILL_LOCK:
+        data = load_index(home)
+        norm = normalize_origin(origin)
+        if not alias or not norm:
+            return {}
+        data.setdefault("aliases", {})[alias] = {
+            "origin": norm,
+            "updated": int(time.time()),
+        }
+        save_index(home, data)
+        return data["aliases"][alias]
+
+
+def index_get(home: Path | str, origin: str) -> list:
+    """Aliases whose recorded origin matches exactly (never substring)."""
+    want = normalize_origin(origin)
+    if not want:
+        return []
+    return sorted(a for a, v in load_index(home).get("aliases", {}).items()
+                  if origins_match(v.get("origin"), want))
 
 
 def autofill_rate_ok(alias: str) -> bool:

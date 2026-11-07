@@ -44,12 +44,12 @@ jobs:
           python-version: "3.11"
       - name: Sintaxis Python del plugin y del sync
         run: |
-          python3 -m py_compile __init__.py keygate_lib.py
+          python3 -m py_compile __init__.py keygate_lib.py keygate_web.py keygate_vault.py
           python3 -m py_compile sync/keygate_sync.py
           echo "compila OK"
       - name: Bash sintaxis de los scripts
         run: |
-          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull scripts/keygate-test scripts/keygate-unlock scripts/keygate-vault; do
+          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull scripts/keygate-test scripts/keygate-unlock scripts/keygate-vault scripts/keygate-store; do
             bash -n "$f" || exit 1
           done
           echo "scripts OK"

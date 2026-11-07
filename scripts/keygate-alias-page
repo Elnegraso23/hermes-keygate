@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# keygate-alias-page — página de alias y auto-fill (LAN por defecto).
+#
+#   keygate-alias-page init                 crea/cambia la contraseña de la página
+#   keygate-alias-page serve [--bind IP] [--port 8790]
+#   keygate-alias-page url [ALIAS]          imprime el link que Hermes debe enviar
+#   keygate-alias-page selftest             humo: 401 sin auth, 200 con auth
+#
+# Sólo gestiona políticas (qué alias hace fill sin pedir aprobación). Nunca
+# muestra ni acepta contraseñas de sitios: para eso está KeePass.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(dirname "$HERE")"
+PY="${PYTHON:-python3}"
+PORT="${KEYGATE_WEB_PORT:-8790}"
+
+case "${1:-help}" in
+  selftest)
+    # puerto libre efímero: 8790 puede estar ocupado por el servicio real
+    PORT="$("$PY" -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+    PW="$(head -c 18 /dev/urandom | base64 | tr -d '/+=' | head -c 18)"
+    HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}" "$PY" - "$PW" <<'PYEOF'
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import keygate_web as kw
+kw.set_password(sys.argv[1])
+print("pw-set")
+PYEOF
+    "$PY" "$PLUGIN_DIR/keygate_web.py" serve --bind 127.0.0.1 --port "$PORT" &
+    SRV=$!
+    trap 'kill "$SRV" 2>/dev/null || true' EXIT
+    for _ in $(seq 1 20); do
+      sleep 0.2
+      curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && break
+    done
+    CODE_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" || true)"
+    CODE_AUTH="$(curl -s -o /dev/null -w '%{http_code}' -u "owner:$PW" "http://127.0.0.1:$PORT/" || true)"
+    echo "sin auth: $CODE_UNAUTH | con auth: $CODE_AUTH"
+    [ "$CODE_UNAUTH" = "401" ] && [ "$CODE_AUTH" = "200" ] || { echo "FALLO"; exit 1; }
+    echo "selftest OK"
+    ;;
+  help|--help|-h|*)
+    exec "$PY" "$PLUGIN_DIR/keygate_web.py" "$@"
+    ;;
+esac

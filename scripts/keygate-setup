@@ -66,8 +66,29 @@ fi
 # El directorio del vault puede no existir (server con home fresco, sin
 # ~/Documentos): db-create falla con "No such file or directory" si no.
 mkdir -p "$(dirname "$DB")"
-echo "-- creating operative DB (keyfile-only, no master password)"
-keepassxc-cli db-create --set-key-file "$KF" "$DB"
+# Protección de la base operativa: elección explícita en la instalación.
+#   key      -> solo keyfile (histórico: abre sin prompt)
+#   password -> keyfile + contraseña maestra (pide la contraseña al abrir)
+DBPW_MODE="${KEYGATE_DB_PASSWORD_MODE:-ask}"
+if [ "$DBPW_MODE" = "ask" ]; then
+  echo
+  echo "¿Cómo se protege la base operativa $DB ?"
+  echo "  1) Solo keyfile (.key)   -> abre sin prompt (por defecto)"
+  echo "  2) Keyfile + contraseña  -> se pide la contraseña maestra al abrir"
+  read -r -p "Opción [1]: " _opt
+  case "${_opt:-1}" in
+    2) DBPW_MODE=password ;;
+    *) DBPW_MODE=key ;;
+  esac
+fi
+if [ "$DBPW_MODE" = "password" ]; then
+  echo "-- creating operative DB (keyfile + MASTER PASSWORD)"
+  echo "   (se te pedirá la contraseña dos veces; no se guarda en disco ni en argv)"
+  keepassxc-cli db-create --set-key-file "$KF" -p "$DB"
+else
+  echo "-- creating operative DB (keyfile-only, no master password)"
+  keepassxc-cli db-create --set-key-file "$KF" "$DB"
+fi
 chmod 600 "$DB"
 echo "-- add copies now: keepassxc \"$DB\"  (alias style: gh-agent-1, URL exacta, TOTP if needed)"
 mkdir -p "$(dirname "$APROF")"
@@ -88,6 +109,13 @@ EOF
 else
   echo "-- agent profile exists: $APROF"
 fi
-echo "-- verify non-interactive read (must print entry list or empty, never prompt):"
-timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" < /dev/null || echo "(locked/missing ok — unlock in GUI, keyfile-only = 1 click)"
+echo "-- verify non-interactive read:"
+if [ "$DBPW_MODE" = "password" ]; then
+  echo "   la DB tiene contraseña maestra: para lecturas no interactivas exporta"
+  echo "   KEYGATE_DB_PASSWORD en el entorno de Hermes (nunca en argv ni en el chat)."
+  echo "   Prueba manual:  KEYGATE_DB_PASSWORD=... keepassxc-cli ls -k \"$KF\" -q \"$DB\""
+else
+  echo "   (must print entry list or empty, never prompt):"
+  timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" < /dev/null || echo "   (locked/missing ok: unlock in GUI, keyfile-only = 1 click)"
+fi
 echo "== done =="

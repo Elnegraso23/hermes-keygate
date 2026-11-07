@@ -92,8 +92,12 @@ class KeepassSource(SecretSource):
         secrets: Dict[str, str] = {}
         for name, (alias, field) in valid.items():
             try:
+                # kxc_auth() drops --no-password when a DB master password is
+                # configured. This helper path cannot feed the password on
+                # stdin, so it fails closed (warns "not found/locked"): prefer
+                # alias fills over kpx:// references on password-protected DBs.
                 proc = run_secret_cli(
-                    ["keepassxc-cli", "show", "-k", kf, "--no-password", "-q",
+                    ["keepassxc-cli", "show", *kg.kxc_auth(kf), "-q",
                      *([] if field != "totp" else ["-t"]), "-s",
                      *([] if field == "totp" else ["-a", _attr(field)]),
                      "--", db, alias],
@@ -136,6 +140,42 @@ def _plug_cfg() -> dict:
         return sec if isinstance(sec, dict) else {}
     except Exception:
         return {}
+
+
+def _vault_sync(cfg: Optional[dict]) -> bool:
+    """May keygate mirror logins into Hermes' native vault? Default: NO.
+
+    With the plugin installed, login work belongs to keygate: the native vault
+    stays out of the credential path. Opt in with plugin config
+    ``vault_sync: true`` or ``KEYGATE_VAULT_SYNC=1``.
+    """
+    env = os.environ.get("KEYGATE_VAULT_SYNC", "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if isinstance(cfg, dict):
+        v = cfg.get("vault_sync")
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _store_mode(cfg: Optional[dict]) -> str:
+    """Where keygate keeps the secret, if anywhere.
+
+    ``live``   (default) no copy: every fill resolves from hermes.kdbx.
+    ``mirror`` encrypted copy in keygate's own store (key, or key+passphrase),
+               so a fill works while KeePassXC is closed.
+    """
+    env = os.environ.get("KEYGATE_STORE_MODE", "").strip().lower()
+    if env in ("live", "mirror"):
+        return env
+    if isinstance(cfg, dict):
+        v = str(cfg.get("store_mode") or "").strip().lower()
+        if v in ("live", "mirror"):
+            return v
+    return "live"
 
 
 def _home() -> Path:
@@ -779,6 +819,52 @@ def register(ctx):
             return json.dumps({"success": False,
                                "error": resolve_err or "alias not found in operative vault"})
         leaf_alias = match.split("/")[-1]
+        if not _vault_sync(cfg):
+            # Default path: no copy anywhere. Only a secret-free pointer
+            # (origin -> alias) is recorded so lookups are a single call.
+            entry_url = kg.show_field(db, kf, match, "url") or ""
+            if not entry_url:
+                return json.dumps({"success": False,
+                                   "error": "entry needs a URL in KeePass to build the index"})
+            label = f"keygate:{leaf_alias}"
+            kg.index_put(_home(), leaf_alias, entry_url)
+            stored = "keygate-index"
+            if _store_mode(cfg) == "mirror":
+                # Optional encrypted copy in keygate's OWN store (key, or
+                # key+passphrase). Never Hermes' native vault.
+                user = kg.show_field(db, kf, match, "username") or ""
+                pw = kg.show_field(db, kf, match, "password") or ""
+                seed = _totp_seed(db, kf, match) or ""
+                user_b = bytearray(user.encode("utf-8"))
+                pw_b = bytearray(pw.encode("utf-8"))
+                seed_b = bytearray(seed.encode("utf-8"))
+                try:
+                    import keygate_vault as kgv
+                    kgv.add_item(_home(), label=label,
+                                 origin=kg.normalize_origin(entry_url),
+                                 identifier=user,
+                                 identifier_type=("email" if "@" in user else "username"),
+                                 password=pw, otp_secret=seed)
+                    stored = "keygate-vault"
+                except PermissionError:
+                    stored = "keygate-index-locked"
+                finally:
+                    kg.zeroize(user_b)
+                    kg.zeroize(pw_b)
+                    kg.zeroize(seed_b)
+                    user = pw = seed = ""
+            kg.audit(_home(), {"ev": "import", "alias": kg.redact_label(leaf_alias),
+                               "decision": "index_only", "vault_sync": False,
+                               "store_mode": _store_mode(cfg), "stored": stored})
+            return json.dumps({"success": True, "indexed": True, "imported": False,
+                               "label": label, "stored": stored, "vault_sync": False,
+                               "store_mode": _store_mode(cfg),
+                               "origin": kg.normalize_origin(entry_url),
+                               "next": ("keygate_lookup(origin) then keygate_request_fill"
+                                        "(alias, origin) — nothing was copied anywhere"
+                                        + ("; keygate store locked: run "
+                                           "scripts/keygate-store unlock and retry"
+                                           if stored == "keygate-index-locked" else ""))})
         try:
             from tools.approval_prompt import request_elicitation_consent
             decision = request_elicitation_consent(
@@ -843,13 +929,87 @@ def register(ctx):
         name="keygate_import",
         toolset="keygate",
         schema={"name": "keygate_import",
-                "description": ("Mirror ONE KeePass operative copy into the encrypted local vault "
-                                "(label keygate:<alias>) after ONE approval. Afterwards native "
-                                "browser_vault_fill works by default. Values never enter the chat."),
+                "description": ("Register ONE KeePass alias for keygate. By default it only "
+                                "records a secret-free pointer (origin -> alias) and copies "
+                                "NOTHING: fills stay server-side from KeePass. Set "
+                                "vault_sync=true to mirror into Hermes' native vault instead. "
+                                "Values never enter the chat."),
                 "parameters": {"type": "object",
                                "properties": {"alias": {"type": "string"}},
                                "required": ["alias"]}},
         handler=h_import)
+
+    # ---- keygate_lookup: origin -> alias in ONE call, zero secrets ---------
+    def h_lookup(params, **kw):
+        del kw
+        raw = str((params or {}).get("origin") or "").strip()
+        if not raw:
+            return json.dumps({"success": False, "error": "origin required"})
+        origin = kg.normalize_origin(raw)
+        if not origin:
+            return json.dumps({"success": False,
+                               "error": "origin must be a valid http(s)://host URL"})
+        aliases = [a for a in kg.index_get(_home(), origin)
+                   if a not in kg.load_autofill(_home()).get("policies", {})]
+        for a, v in kg.load_autofill(_home()).get("policies", {}).items():
+            if a not in aliases and kg.origins_match(v.get("origin"), origin):
+                aliases.append(a)
+        if not aliases:
+            return json.dumps({"success": True, "origin": origin, "aliases": [],
+                               "next": ("no alias mapped for this origin: ask the user for "
+                                        "the KeePass alias, then keygate_import")})
+        policies = kg.load_autofill(_home()).get("policies", {})
+        out = []
+        for a in sorted(aliases):
+            auto = bool((policies.get(a) or {}).get("enabled")) and \
+                kg.origins_match((policies.get(a) or {}).get("origin"), origin)
+            out.append({"alias": a, "auto_fill": auto,
+                        "next": (f"keygate_request_fill(alias={a!r}, origin={origin!r})"
+                                 if auto else
+                                 "ask the user to enable auto-fill on the keygate alias page "
+                                 "(keygate_link) before filling")})
+        kg.audit(_home(), {"ev": "lookup", "origin": kg.redact_origin(origin),
+                           "aliases": [kg.redact_label(a) for a in aliases]})
+        return json.dumps({"success": True, "origin": origin, "aliases": out,
+                           "note": "secret-free: no passwords or identifiers returned"})
+
+    ctx.register_tool(
+        name="keygate_lookup",
+        toolset="keygate",
+        schema={"name": "keygate_lookup",
+                "description": ("Resolve a page origin to its keygate alias in ONE call "
+                                "(secret-free pointer table) and say whether auto-fill is "
+                                "on, i.e. whether an approval prompt will appear."),
+                "parameters": {"type": "object",
+                               "properties": {"origin": {"type": "string"}},
+                               "required": ["origin"]}},
+        handler=h_lookup)
+
+    # ---- keygate_link: hand the user a URL instead of an approval prompt ---
+    def h_link(params, **kw):
+        del kw
+        alias = str((params or {}).get("alias") or "").strip()
+        try:
+            import keygate_web as _web
+            url = _web.url_for(alias)
+        except Exception as exc:
+            return json.dumps({"success": False,
+                               "error": f"alias page unavailable: {exc}"})
+        return json.dumps({"success": True, "alias": alias, "url": url,
+                           "note": ("send this link to the user; enabling auto-fill there "
+                                    "removes the approval prompt from future fills. The page "
+                                    "never shows or accepts site passwords.")})
+
+    ctx.register_tool(
+        name="keygate_link",
+        toolset="keygate",
+        schema={"name": "keygate_link",
+                "description": ("Return the keygate alias-page URL for this alias. Use it "
+                                "instead of asking for an approval on every login."),
+                "parameters": {"type": "object",
+                               "properties": {"alias": {"type": "string"}},
+                               "required": ["alias"]}},
+        handler=h_link)
 
 
 def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
@@ -857,7 +1017,7 @@ def _totp_seed(db: str, kf: str, entry: str) -> Optional[str]:
     no seed or the CLI does not expose it (codes still work via show -t)."""
     import re as _re
     try:
-        p = kg._run_kxc(["show", "-k", kf, "--no-password", "-q",
+        p = kg._run_kxc(["show", *kg.kxc_auth(kf), "-q",
                          "--all", "--", db, entry])
     except Exception:
         return None

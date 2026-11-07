@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# keygate-store — base cifrada PROPIA de keygate (no la DB de KeePass).
+#
+#   keygate-store init              solo llave local (~/.hermes/keygate-vault.key, 0600)
+#   keygate-store init --passphrase llave + contraseña (scrypt; sin archivo de llave)
+#   keygate-store unlock            pide la contraseña y la cachea en memoria 15 min
+#   keygate-store set-passphrase    añade/cambia la contraseña (re-cifra todo)
+#   keygate-store remove-passphrase quita la contraseña y vuelve a modo llave
+#   keygate-store status | list | lock | delete <label>
+#
+# La contraseña se lee por TTY (getpass): nunca por argumento, nunca por el chat.
+# Sólo aplica en store_mode=mirror; con el default (live) no hay copia que cifrar.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(dirname "$HERE")"
+PY="${PYTHON:-python3}"
+
+exec "$PY" "$PLUGIN_DIR/keygate_vault.py" "$@"
