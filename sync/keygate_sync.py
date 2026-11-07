@@ -376,7 +376,7 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
   <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path d="M12 2 4.5 5v5.6c0 4.9 3.1 8.2 7.5 9.9 4.4-1.7 7.5-5 7.5-9.9V5L12 2Z" fill="#0b1220" opacity=".35"/><path d="M12 6.2a3.6 3.6 0 0 0-1.7 6.8v3.2a1.7 1.7 0 0 0 3.4 0v-3.2A3.6 3.6 0 0 0 12 6.2Z" fill="#fff"/></svg></div><div><h1>keygate-sync</h1>
   <div class="sub s1">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></div>
   <div class="topbar hide" id="userbar">
-    <button class="ghost sm" data-act="togglePwReset">🔒 Cambiar clave</button>
+    <button class="ghost sm" id="pwchangebtn" data-act="togglePwReset">🔒 Cambiar clave</button>
     <button class="ghost sm" id="logout" data-act="logout">Cerrar sesión</button>
   </div>
 </header>
@@ -582,7 +582,17 @@ async function boot() {
   } catch (e) { document.getElementById('setupout').classList.remove('hide');
     document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
     document.getElementById('setupcard').classList.remove('hide'); return; }
-  if (st.noauth_active) { showAuthedUI(); load(); return; }
+  window.__noauth = !!st.noauth_active;
+  if (st.noauth_active) {
+    showAuthedUI();
+    // Sin contraseña no hay nada que cambiar ni sesión que cerrar.
+    ['pwchangebtn', 'logout'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('hide');
+    });
+    load();
+    return;
+  }
   if (st.setup_required) {
     if (st.can_skip_auth) {
       document.getElementById('skiprow').classList.remove('hide');
@@ -781,7 +791,8 @@ async function load() {
     if (served) { killOb(); }
     const n = items.length;
     document.getElementById('checklist').innerHTML =
-      '✅ Contraseña creada (estás dentro)<br>' +
+      (window.__noauth ? '✅ Acceso sin contraseña (modo elegido)<br>'
+                       : '✅ Contraseña creada (estás dentro)<br>') +
       (n ? `✅ .kdbx con ${n} alias` : '⬜ .kdbx vacío — súbelo con tus copias') + '<br>' +
       (served ? '✅ .key descargado (botón muerto)' : '⬜ .key sin descargar (una sola vez)');
   } catch (e) { document.getElementById('checklist').textContent = 'No se pudo leer el estado.'; }
