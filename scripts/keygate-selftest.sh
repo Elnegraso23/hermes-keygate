@@ -150,6 +150,14 @@ HOME="$SHOME" KEYGATE_DB="$SDB" KEYGATE_KEYFILE="$SKF" KEYGATE_BIND=127.0.0.1 KE
 SRV=$!
 sleep 2
 B="http://127.0.0.1:$SPORT"
+# F5: desde que /api/* exige Origin o Sec-Fetch-Site, el selftest se comporta
+# como un navegador real: añade Origin a todo curl que no traiga uno propio.
+# Los tests negativos de CSRF siguen mandando su Origin y ganan (no se duplica).
+curl() {
+  local a=("$@") x has=0
+  for x in "${a[@]}"; do case "$x" in Origin:*) has=1 ;; esac; done
+  if [ "$has" = "1" ]; then command curl "${a[@]}"; else command curl -H "Origin: $B" "${a[@]}"; fi
+}
 [ -f "$SHOME/.hermes/keygate-sync.pid" ] && ok "server escribe PID file" \
   || bad "PID file del server" "no apareció $SHOME/.hermes/keygate-sync.pid"
 code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$B/api/health")
@@ -191,8 +199,24 @@ no_host=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -H 'Host:' "$B/")
 good_code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$B/")
 [ "$good_code" = "200" ] && ok "H12: Host legítimo aceptado" \
   || bad "H12 Host legítimo" "esperaba 200, obtuvo $good_code"
-r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
-echo "$r" | grep -q '"success": true' && ok "set-password inicial" || bad "set-password" "$r"
+# F5: sin Origin ni Sec-Fetch-Site -> 403 (un curl pelado ya no puede reclamar la primera visita)
+no_origin=$(command curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/set-password" \
+  -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
+[ "$no_origin" = "403" ] && ok "F5: POST sin Origin ni Sec-Fetch-Site -> 403" \
+  || bad "F5 sin Origin" "esperaba 403, obtuvo $no_origin"
+# F5: con Origin correcto pero sin código de arranque -> 403
+no_boot=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/set-password" \
+  -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
+[ "$no_boot" = "403" ] && ok "F5: sin código de arranque -> 403" \
+  || bad "F5 sin bootstrap" "esperaba 403, obtuvo $no_boot"
+BOOT=$(cat "$SHOME/.hermes/keygate-sync-bootstrap" 2>/dev/null || true)
+[ -n "$BOOT" ] && ok "F5: código de arranque generado (0600)" \
+  || bad "bootstrap" "no apareció $SHOME/.hermes/keygate-sync-bootstrap"
+r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' \
+  -d "{\"password\":\"$PW1\",\"bootstrap\":\"$BOOT\"}")
+echo "$r" | grep -q '"success": true' && ok "set-password inicial (con código de arranque)" || bad "set-password" "$r"
+[ ! -f "$SHOME/.hermes/keygate-sync-bootstrap" ] && ok "F5: código consumido y borrado" \
+  || bad "bootstrap consumo" "el fichero sigue existiendo"
 code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
   -H 'Content-Type: application/json' -d "{\"current\":\"mal\",\"new\":\"$PW2\"}")
 [ "$code" = "401" ] && ok "reset sin Bearer -> 401" || bad "reset sin auth" "code=$code"

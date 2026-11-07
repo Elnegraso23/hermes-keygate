@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.7-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.8-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
-[![Tests: selftest 22/22](https://img.shields.io/badge/selftest-32%2F32-success.svg)](scripts/keygate-selftest.sh)
+[![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.1) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.6.8) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -116,6 +116,11 @@ El instalador arranca `keygate-sync` y te manda a la URL que imprime
 guia: ⬇ descarga el `.kdbx` (+ el `.key` una sola vez) → edita en KeePassXC
 (copias con alias opacos, URL exacta, sin notas/adjuntos) → sube el `.kdbx`
 (confirmacion + backup). Quitar acceso = borrar la copia (o cerrar la DB).
+
+Antes de crear la contraseña, esa tarjeta pide el **código de arranque** de un
+solo uso: lo imprime la consola donde corre `keygate-sync` y vive en
+`~/.hermes/keygate-sync-bootstrap` (0600). Sin ese código nadie puede crear la
+contraseña aunque llegue al puerto antes que tú; se borra al crearla.
 
 Alternativa mismo-PC (sin pagina): abre `~/Documentos/hermes.kdbx` directo en
 KeePassXC con `~/.keepass-agent.key`. La pagina sigue siendo el camino normal —

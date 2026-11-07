@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Unit tests for keygate_lib (origin normalisation, redaction, fill JS,
+# autofill policy/rate). Runs from inside tests/ on purpose: the repo root
+# holds the plugin __init__.py, which needs the Hermes runtime at import time.
+# `pytest` from the repo root therefore fails collection — see tests/conftest.py.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$here/../tests"
+# Interpreter: PYTEST_PYTHON if set, else python3. Deliberately not $PYTHON:
+# that points at whatever venv the caller exported and usually lacks pytest.
+exec "${PYTEST_PYTHON:-python3}" -m pytest . -q "$@"

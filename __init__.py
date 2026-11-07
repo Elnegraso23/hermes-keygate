@@ -575,6 +575,18 @@ def register(ctx):
                                             "path: report `channel` + run keygate_doctor. Never retry "
                                             "silently and never use execute_code/curl with credentials.")})
 
+        # 2) Fail-closed audit: the secret is not touched unless the intent
+        # could be persisted. A silent audit failure would leave a credential
+        # use with no trace (F2), so the fill is aborted instead.
+        try:
+            kg.audit(_home(), {"ev": "fill", "alias": kg.redact_label(leaf_alias),
+                               "origin": kg.redact_origin(origin),
+                               "decision": "intent", **approval_evidence}, strict=True)
+        except kg.AuditError:
+            return json.dumps({"success": False, "error_type": "audit_unavailable",
+                               "error": ("audit log not writable — fill aborted "
+                                         "(fail-closed)")})
+
         # 2-4) Blind fill through the native secret-safe path (exact-origin
         # binding, inspect+classify, CDP WebSocket only, redaction boundary).
         # Username also fills server-side so the full identifier never enters

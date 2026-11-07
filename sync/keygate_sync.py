@@ -38,6 +38,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -90,6 +91,63 @@ def check_password(home: Path, given: str) -> bool:
     if not given:
         return False
     return hmac.compare_digest(hash_pw(given, salt), want)
+
+
+# ------------------------------------------------- bootstrap (first visit) ---
+# The password is created by whoever reaches the page first. Before this code
+# existed, any script that could reach the port (tailnet peer, LAN) could POST
+# /api/set-password and own the sync UI. Now the claim requires a one-shot
+# code that only the person running the server can read (~/.hermes file 0600
+# or the console), and the file is deleted once the password exists.
+
+def bootstrap_path(home: Path) -> Path:
+    return home / "keygate-sync-bootstrap"
+
+
+def bootstrap_ensure(home: Path, show: bool = True) -> str:
+    """Create the one-shot code if no password exists yet. Returns '' otherwise."""
+    if password_is_set(home):
+        return ""
+    pf = bootstrap_path(home)
+    try:
+        code = pf.read_text().strip()
+        if code:
+            return code
+    except Exception:
+        pass
+    code = secrets.token_urlsafe(16)
+    try:
+        pf.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(pf), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(code)
+        os.chmod(pf, 0o600)
+    except Exception:
+        return ""
+    if show:
+        print(f"CODIGO DE ARRANQUE (una sola vez, para crear la contrasena): {code}",
+              file=sys.stderr)
+    return code
+
+
+def bootstrap_ok(home: Path, given: str) -> bool:
+    """Constant-time comparison against the on-disk one-shot code."""
+    if not given:
+        return False
+    try:
+        want = bootstrap_path(home).read_text().strip()
+    except Exception:
+        return False
+    if not want:
+        return False
+    return hmac.compare_digest(given.strip(), want)
+
+
+def bootstrap_clear(home: Path) -> None:
+    try:
+        bootstrap_path(home).unlink()
+    except Exception:
+        pass
 
 
 def set_password_once(home: Path, password: str) -> bool:
@@ -241,6 +299,10 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
   <button class="ghost sm" type="button" onclick="toggleVis(['pw1','pw2'])" title="Mostrar/ocultar">👁</button>
   <button onclick="kg_setup()">Crear</button>
 </div>
+<div class="row" style="margin-top:8px">
+  <input type="text" id="kg_bootstrap" placeholder="Código de arranque (lo imprime la consola del servidor)" autocomplete="off" style="flex:1;min-width:260px">
+</div>
+<div class="sub" style="margin:6px 0 0;font-size:12px">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
 <div class="sub" id="setuphint" style="margin:8px 0 0;font-size:12px">Longitud: 0 / 12 caracteres mínimo.</div>
 <pre id="setupout" style="display:none"></pre>
 </div>
@@ -435,7 +497,8 @@ async function kg_setup() {
   try {
     const r = await fetch('/api/set-password', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({password: a})});
+      body: JSON.stringify({password: a,
+        bootstrap: (document.getElementById('kg_bootstrap') || {}).value || ''})});
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { out.textContent = 'Falló: ' + (j.error || r.status); return; }
   } catch (e) { out.textContent = 'Servidor no responde.'; return; }
@@ -698,8 +761,19 @@ class Handler(BaseHTTPRequestHandler):
             return -1
 
     def _host_ok(self) -> bool:
-        """Strict Host check (DNS-rebinding defense). Never echoes the input."""
-        raw = (self.headers.get("Host") or "").strip().lower()
+        """Strict Host check (DNS-rebinding defense). Never echoes the input.
+
+        Exactly one Host value is accepted: a duplicated or comma-joined header
+        means something rewrote the request (proxy, smuggling attempt), and
+        `headers.get()` would silently pick the first value and pass it.
+        """
+        try:
+            vals = self.headers.get_all("Host") or []
+        except Exception:
+            vals = []
+        if len(vals) != 1 or "," in vals[0]:
+            return False
+        raw = vals[0].strip().lower()
         return bool(raw) and raw in _ALLOWED_HOSTS
 
     def _send_sec_headers(self, no_store: bool = True) -> None:
@@ -716,12 +790,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store, max-age=0")
 
     def _csrf_ok(self, want_json: bool = True) -> bool:
-        """Block cross-origin browser POSTs (Drive-By CSRF protection)."""
+        """Block cross-origin browser POSTs (Drive-By CSRF protection).
+
+        A browser always attaches `Origin` (POST) and `Sec-Fetch-Site`, so a
+        request carrying neither is not a page — it is a script. Requiring one
+        of them closes the Origin-less hole that let `curl -X POST` reach
+        /api/set-password and claim the sync password before the owner visited.
+        """
         sfs = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        origin = (self.headers.get("Origin") or "").strip()
+        if not sfs and not origin:
+            self._send(403, {"success": False, "error": "cross-origin request blocked (CSRF)"})
+            return False
         if sfs and sfs not in ("same-origin", "none"):
             self._send(403, {"success": False, "error": "cross-origin request blocked (CSRF)"})
             return False
-        origin = (self.headers.get("Origin") or "").strip()
         if origin:
             host = (self.headers.get("Host") or "").strip().lower()
             orig_host = (urlparse(origin).netloc or "").strip().lower()
@@ -1026,13 +1109,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, {"success": False, "error": "bad request size"})
                 return
             try:
-                password = str(json.loads(self.rfile.read(length).decode()).get("password") or "")
+                body_j = json.loads(self.rfile.read(length).decode())
             except Exception:
                 self._send(400, {"success": False, "error": "bad json"})
                 return
             if password_is_set(self._home()):
                 self._send(403, {"success": False, "error": "password already set"})
                 return
+            # One-shot bootstrap code: proves the caller is the person running
+            # the server, not a peer that merely reached the port first.
+            if not bootstrap_ok(self._home(), str(body_j.get("bootstrap") or "")):
+                self._send(403, {"success": False,
+                                 "error": "bootstrap code required",
+                                 "bootstrap_required": True})
+                return
+            password = str(body_j.get("password") or "")
             if len(password) < PW_MIN_LEN:
                 self._send(400, {"success": False,
                                  "error": f"password must be >= {PW_MIN_LEN} chars"})
@@ -1045,6 +1136,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._send(500, {"success": False, "error": "could not store password"})
                 return
+            bootstrap_clear(self._home())
             audit_ev(self._home(), {"ev": "sync", "action": "password-created"})
             self._send(200, {"success": True})
             return
@@ -1257,6 +1349,11 @@ def main() -> int:
     if not password_is_set(home):
         print("Sin contraseña todavía: la primera visita a la pagina la crea (min 12, una sola vez).",
               file=sys.stderr)
+        # One-shot claim code (F5): without it a peer that reaches the port
+        # first could create the password and own the sync UI.
+        if not bootstrap_ensure(home):
+            print("AVISO: no se pudo crear el código de arranque; /api/set-password rechazará todo.",
+                  file=sys.stderr)
     try:  # PID file: lets the installer stop THIS server without pkill
         # (Hermes' gateway guard blocks pkill patterns).
         pf = home / "keygate-sync.pid"

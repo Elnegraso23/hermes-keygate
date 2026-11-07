@@ -4,6 +4,21 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.8 — 2026-11-07
+- **F5 — CSRF sin `Origin` + código de arranque**: `/api/*` rechaza POST que no
+  traigan `Origin` **ni** `Sec-Fetch-Site` (403). La primera visita exige un
+  código de un solo uso (`~/.hermes/keygate-sync-bootstrap`, 0600, impreso en
+  la consola) que se borra al crear la contraseña: un peer que alcance el
+  puerto antes ya no puede reclamar la UI de sync.
+- **F6 — `Host` duplicado**: más de un `Host` (o con comas) → 403.
+- **F2 — auditoría fail-closed en el fill**: `kg.audit(..., strict=True)` con
+  `fsync`; si la línea no se puede persistir, el relleno se aborta con
+  `audit_unavailable`. Los eventos de lectura siguen best-effort.
+- **F1 — tests que nunca corrían**: `pytest` se ejecuta desde `tests/`
+  (`tests/conftest.py` + `scripts/keygate-test`), 40 pruebas en CI, que antes
+  solo corría `unittest` sobre `test_autofill*` (9 de 29).
+- Selftest: 44 PASS (nuevos casos F5/F6). ZAP 2.17 + JRE 17 headless.
+
 ## 0.6.7 — 2026-11-05
 
 - **Licencia**: el proyecto pasa a **MIT**, software libre OSI aprobado y sin

@@ -427,19 +427,35 @@ def parse_kpx_ref(ref: str) -> Optional[Tuple[str, str]]:
 # ---------------------------------------------------------------- audit ---
 
 
-def audit(home: Path, event: dict) -> None:
+class AuditError(RuntimeError):
+    """`audit(strict=True)` could not persist the event (fail-closed path)."""
+
+
+def audit(home: Path, event: dict, strict: bool = False) -> None:
+    """Append one audit line.
+
+    Best-effort by default: a failed audit must never break a read-only path
+    (status, search, sync toggles). With `strict=True` the write is flushed and
+    fsync'd, and any failure raises AuditError — callers on the credential path
+    pass strict=True so a fill can never happen untraced.
+    """
+    event = {"ts": int(time.time()), **event}
+    line = json.dumps(event, ensure_ascii=False) + "\n"
     try:
         home.mkdir(parents=True, exist_ok=True)
         fp = home / AUDIT_NAME
-        event = {"ts": int(time.time()), **event}
         with open(fp, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+            f.write(line)
+            if strict:
+                f.flush()
+                os.fsync(f.fileno())
         try:
             os.chmod(fp, 0o600)
         except Exception:
             pass
-    except Exception:
-        pass
+    except Exception as exc:
+        if strict:
+            raise AuditError(f"audit write failed: {type(exc).__name__}") from exc
 
 
 def harden_fill_js(js: str, expected_origin: str) -> str:
