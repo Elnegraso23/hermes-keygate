@@ -162,6 +162,27 @@ else
   fi
 fi
 
+# 5b. Paridad terminal ↔ web: la contraseña de la web se crea aquí, no en el
+# navegador. Así no hace falta copiar el código de un solo uso desde la consola
+# para reclamar la primera visita; el código sigue existiendo para acceso
+# remoto, pero una instalación local ya deja la web lista para entrar.
+SYNC_PW_FILE="$HOME/.hermes/keygate-web-pass"
+if [ ! -f "$HOME/.hermes/keygate-sync-pass" ]; then
+  SYNC_PW="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
+  DEST_SYNC="$DEST/sync" HH="$HOME/.hermes" KEYGATE_SYNC_PW="$SYNC_PW" python3 - <<'PYEOF'
+import os, pathlib, sys
+sys.path.insert(0, os.environ["DEST_SYNC"])
+import keygate_sync as ks
+ok = ks.set_password_once(pathlib.Path(os.environ["HH"]), os.environ["KEYGATE_SYNC_PW"])
+print("sync-pw:" + ("ok" if ok else "no"))
+PYEOF
+  printf '%s\n' "$SYNC_PW" > "$SYNC_PW_FILE"
+  chmod 600 "$SYNC_PW_FILE"
+  rm -f "$HOME/.hermes/keygate-sync-bootstrap"
+  unset SYNC_PW
+  say "contraseña de la web (sync) en $SYNC_PW_FILE (0600) — código de un solo uso ya no hace falta"
+fi
+
 # 6. Página de alias (keygate_link). Opt-out con KEYGATE_ALIAS_PAGE=0.
 # Bind: tailnet si existe, si no 127.0.0.1. Nunca 0.0.0.0 por defecto.
 ALIAS_PORT="${KEYGATE_ALIAS_PORT:-8790}"
