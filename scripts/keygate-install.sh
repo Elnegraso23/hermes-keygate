@@ -11,9 +11,11 @@ set -euo pipefail
 
 REPO_DEFAULT="${KEYGATE_REPO:-$HOME/Projects/github/hermes-keygate}"
 REPO="$REPO_DEFAULT"; RESET=0
+NOWEB=0
 for a in "$@"; do
   case "$a" in
     --reset) RESET=1 ;;
+    --no-web-auth) NOWEB=1 ;;
     *) REPO="$a" ;;
   esac
 done
@@ -128,6 +130,7 @@ Environment=KEYGATE_DB=$DB
 Environment=KEYGATE_KEYFILE=$KF
 Environment=KEYGATE_BIND=$BIND
 Environment=KEYGATE_PORT=$PORT
+Environment=KEYGATE_ALLOW_NOAUTH=$NOWEB
 ExecStart=$PY_BIN $DEST/sync/keygate_sync.py
 Restart=always
 RestartSec=3
@@ -178,7 +181,11 @@ fi
 # Con terminal se pide aquí (dos veces, sin eco, nunca a un archivo). Sin
 # terminal NO se crea: la primera visita a la web la pide, con el código de un
 # solo uso que imprime el servidor.
-if [ ! -f "$HOME/.hermes/keygate-sync-pass" ]; then
+if [ "$NOWEB" = 1 ]; then
+  printf '%s\n' "$(date +%s)" > "$HOME/.hermes/keygate-sync-noauth"
+  chmod 600 "$HOME/.hermes/keygate-sync-noauth"
+  say "web SIN contraseña (entra directo) — modo pedido con --no-web-auth"
+elif [ ! -f "$HOME/.hermes/keygate-sync-pass" ]; then
   if [ -t 0 ]; then
     DEST_SYNC="$DEST/sync" HH="$HOME/.hermes" python3 - <<'PYEOF'
 import getpass, os, pathlib, sys
@@ -200,12 +207,16 @@ PYEOF
   fi
 fi
 
+[ "$NOWEB" = 1 ] && systemctl --user restart keygate-sync 2>/dev/null && sleep 2
+
 # 6. Página de alias (keygate_link). Opt-out con KEYGATE_ALIAS_PAGE=0.
 # Bind: tailnet si existe, si no 127.0.0.1. Nunca 0.0.0.0 por defecto.
 ALIAS_PORT="${KEYGATE_ALIAS_PORT:-8790}"
 if [ "${KEYGATE_ALIAS_PAGE:-1}" != "0" ]; then
   PW_FILE="$HOME/.hermes/keygate-alias-page-pass"
-  if [ ! -f "$HOME/.hermes/keygate-web.meta.json" ]; then
+  if [ "$NOWEB" = 1 ]; then
+    say "página de alias SIN contraseña (misma decisión que la web)"
+  elif [ ! -f "$HOME/.hermes/keygate-web.meta.json" ]; then
     if [ -t 0 ]; then
       python3 "$DEST/keygate_web.py" init || say "(!) sin contrasena de pagina"
     else
@@ -230,6 +241,7 @@ After=network-online.target
 [Service]
 Type=simple
 Environment=HERMES_HOME=$HOME/.hermes
+Environment=KEYGATE_ALIAS_NOAUTH=$NOWEB
 ExecStart=$PY_BIN $DEST/keygate_web.py serve --bind ${BIND} --port ${ALIAS_PORT}
 Restart=on-failure
 RestartSec=3
@@ -251,7 +263,11 @@ UNIT2EOF
       fi
     done
     if [ "$ALIAS_OK" = 1 ]; then
-      say "página de alias viva en http://${BIND}:${ALIAS_PORT} (pide contraseña)"
+      if [ "$NOWEB" = 1 ]; then
+        say "página de alias viva en http://${BIND}:${ALIAS_PORT} (sin contraseña)"
+      else
+        say "página de alias viva en http://${BIND}:${ALIAS_PORT} (pide contraseña)"
+      fi
     else
       say "(!) página de alias no respondió — journalctl --user -u keygate-alias-page"
     fi

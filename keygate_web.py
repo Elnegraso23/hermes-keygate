@@ -80,6 +80,16 @@ def set_password(password: str) -> None:
     _save_meta(meta)
 
 
+def noauth_enabled() -> bool:
+    """Modo sin contraseña explícito (KEYGATE_ALIAS_NOAUTH=1).
+
+    Pensado para una página que sólo escucha en localhost o en la tailnet del
+    dueño, cuando éste decide no poner contraseña. Cualquiera que alcance el
+    puerto puede cambiar el auto-fill de los alias (nunca ver contraseñas).
+    """
+    return (os.environ.get("KEYGATE_ALIAS_NOAUTH") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def check_password(user: str, password: str) -> bool:
     meta = _load_meta()
     if not meta.get("hash") or not meta.get("salt"):
@@ -201,6 +211,8 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), format % args))
 
     def _authed(self) -> bool:
+        if noauth_enabled():
+            return True
         hdr = self.headers.get("Authorization", "")
         if not hdr.startswith("Basic "):
             return False

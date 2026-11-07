@@ -4,6 +4,14 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.2 — 2026-11-07
+- **`--no-web-auth`**: instalación completa sin contraseñas de web. Marca
+  `keygate-sync-noauth` + `KEYGATE_ALLOW_NOAUTH=1` y levanta también la página
+  de alias sin auth (`KEYGATE_ALIAS_NOAUTH=1`). Ambos servicios entran directos.
+  Sin este flag el comportamiento no cambia: contraseña pedida al instalar o en
+  la primera visita.
+- El resumen ya no dice "pide contraseña" cuando la página va sin ella.
+
 ## 0.7.1 — 2026-11-07
 - **La web puede correr sin contraseña** (opción explícita, no silenciosa).
   Botón "Entrar sin contraseña" en la primera visita, visible sólo cuando el
