@@ -4,6 +4,19 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.9 — 2026-11-07
+- **F7 — CSP estricta sin `unsafe-inline`** (lo marcaba ZAP como 4 Medium):
+  `script-src`/`style-src` pasan a `'nonce-<aleatorio por respuesta>'`. Para
+  ello se eliminaron los 25 handlers inline (`onclick`/`oninput`/`onkeydown`)
+  por delegación con `data-act`/`data-oninput`/`data-enter`, los 44 atributos
+  `style=""` por clases `.sN`, y las visibilidades/colores que el JS aplicaba
+  con `el.style.*` por la clase `.hide` y `data-tone` (Chrome también bloquea
+  los estilos creados en runtime).
+- Sin versión en la cabecera `Server` (eliminaba las 4 alertas Low de ZAP).
+- Verificación visual con Chromium headless (puppeteer): 6 capturas del flujo
+  completo, **0 violaciones de CSP** y **0 errores de consola**; ZAP 2.17
+  spider+active: **0 alertas** (antes 4 Medium + 4 Low).
+
 ## 0.6.8 — 2026-11-07
 - **F5 — CSRF sin `Origin` + código de arranque**: `/api/*` rechaza POST que no
   traigan `Origin` **ni** `Sec-Fetch-Site` (403). La primera visita exige un

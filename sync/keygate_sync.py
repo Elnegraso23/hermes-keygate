@@ -230,7 +230,7 @@ def parse_multipart(body: bytes, boundary: bytes):
 INDEX_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>keygate-sync</title>
-<style>
+<style nonce="__NONCE__">
 :root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--card2:#1c232d;--line:#2a3440;--txt:#e6edf3;
 --mut:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149;--btn:#2f6fed;--btn-h:#388bfd}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);
@@ -278,86 +278,116 @@ font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overf
 footer{color:var(--mut);font-size:12px;margin-top:28px;text-align:center}
 code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px;border:1px solid var(--line)}
 a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
+.s1.s1{margin:0}
+
+.s3.s3{border-color:var(--warn)}
+.s4.s4{margin-top:0;color:var(--warn)}
+.s5.s5{flex:1;min-width:200px}
+.s6.s6{margin-top:8px}
+.s7.s7{flex:1;min-width:260px}
+.s8.s8{margin:6px 0 0;font-size:12px}
+.s9.s9{margin:8px 0 0;font-size:12px}
+.s10.s10{border-color:var(--acc)}
+.s11.s11{margin-top:0;color:var(--acc)}
+.s12.s12{justify-content:space-between;margin-bottom:8px}
+.s13.s13{font-size:14px}
+.s14.s14{flex:1;min-width:170px}
+.s15.s15{flex:1}
+.s16.s16{justify-content:space-between;margin-bottom:10px}
+.s17.s17{margin:0;flex:1}
+.s18.s18{min-width:210px}
+.s19.s19{margin-top:12px}
+.s20.s20{margin-top:10px}
+.s21.s21{margin:8px 0 0}
+.s22.s22{justify-content:space-between;align-items:baseline;margin-top:22px}
+.s23.s23{margin-left:6px;font-size:11px}
+.s24.s24{gap:6px}
+.s25.s25{display:flex;align-items:center;gap:6px;cursor:pointer}
+.s26.s26{color:var(--mut);min-width:145px}
+.s27.s27{color:var(--txt)}
+.hide{display:none!important}
+[data-tone="mut"]{color:var(--mut)}[data-tone="warn"]{color:var(--warn)}[data-tone="bad"]{color:var(--bad)}[data-tone="acc"]{color:var(--acc)}
+.aoin{width:210px;padding:7px;font-size:13px}
 </style></head><body><div class="wrap">
 <header>
   <div class="brand"><div class="logo">🔑</div><div><h1>keygate-sync</h1>
-  <div class="sub" style="margin:0">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></div>
-  <div class="topbar" id="userbar" style="display:none">
-    <button class="ghost sm" onclick="togglePwReset()">🔒 Cambiar clave</button>
-    <button class="ghost sm" id="logout" onclick="logout()">Cerrar sesión</button>
+  <div class="sub s1">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></div>
+  <div class="topbar hide" id="userbar">
+    <button class="ghost sm" data-act="togglePwReset">🔒 Cambiar clave</button>
+    <button class="ghost sm" id="logout" data-act="logout">Cerrar sesión</button>
   </div>
 </header>
 
-<div class="card" id="setupcard" style="display:none;border-color:var(--warn)">
-<h2 style="margin-top:0;color:var(--warn)">Crea tu contraseña (primera y única vez)</h2>
+<div class="card s3 hide" id="setupcard">
+<h2 class="s4">Crea tu contraseña (primera y única vez)</h2>
 <div class="sub">No hay contraseña por defecto. Mínimo 12 caracteres. Se guarda con PBKDF2 en el host; aquí solo vive en esta pestaña.</div>
 <div class="row">
-  <input type="password" id="pw1" placeholder="Nueva contraseña (mín. 12)" style="flex:1;min-width:200px"
-   oninput="checkSetupHint()" onkeydown="if(event.key==='Enter')kg_setup()">
-  <input type="password" id="pw2" placeholder="Repítela" style="flex:1;min-width:200px"
-   oninput="checkSetupHint()" onkeydown="if(event.key==='Enter')kg_setup()">
-  <button class="ghost sm" type="button" onclick="toggleVis(['pw1','pw2'])" title="Mostrar/ocultar">👁</button>
-  <button onclick="kg_setup()">Crear</button>
+  <input class="s5" type="password" id="pw1" placeholder="Nueva contraseña (mín. 12)"
+   data-oninput="checkSetupHint" data-enter="kg_setup">
+  <input class="s5" type="password" id="pw2" placeholder="Repítela"
+   data-oninput="checkSetupHint" data-enter="kg_setup">
+  <button class="ghost sm" type="button" data-act="vis" data-ids="pw1,pw2" title="Mostrar/ocultar">👁</button>
+  <button data-act="kg_setup">Crear</button>
 </div>
-<div class="row" style="margin-top:8px">
-  <input type="text" id="kg_bootstrap" placeholder="Código de arranque (lo imprime la consola del servidor)" autocomplete="off" style="flex:1;min-width:260px">
+<div class="row s6">
+  <input class="s7" type="text" id="kg_bootstrap" placeholder="Código de arranque (lo imprime la consola del servidor)" autocomplete="off">
 </div>
-<div class="sub" style="margin:6px 0 0;font-size:12px">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
-<div class="sub" id="setuphint" style="margin:8px 0 0;font-size:12px">Longitud: 0 / 12 caracteres mínimo.</div>
-<pre id="setupout" style="display:none"></pre>
+<div class="sub s8">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
+<div class="sub s9" id="setuphint">Longitud: 0 / 12 caracteres mínimo.</div>
+<pre class="hide" id="setupout"></pre>
 </div>
 
-<div id="logincard" class="card" style="display:none;border-color:var(--acc)">
-<h2 style="margin-top:0;color:var(--acc)">Acceso a keygate-sync</h2>
+<div id="logincard" class="card s10 hide">
+<h2 class="s11">Acceso a keygate-sync</h2>
 <div class="sub">Ingresa la contraseña de la web. No se muestra nada sin ella.</div>
 <div class="row">
-<input type="password" id="loginpw" placeholder="Contraseña" autocomplete="current-password"
- style="flex:1;min-width:200px"
- onkeydown="if(event.key==='Enter')kg_login()">
-<button class="ghost sm" type="button" onclick="toggleVis(['loginpw'])" title="Mostrar/ocultar">👁</button>
-<button onclick="kg_login()">Entrar</button>
+<input class="s5" type="password" id="loginpw" placeholder="Contraseña" autocomplete="current-password"
+
+ data-enter="kg_login">
+<button class="ghost sm" type="button" data-act="vis" data-ids="loginpw" title="Mostrar/ocultar">👁</button>
+<button data-act="kg_login">Entrar</button>
 </div>
-<pre id="loginout" style="display:none"></pre>
+<pre class="hide" id="loginout"></pre>
 </div>
 
-<div id="app" style="display:none">
+<div class="hide" id="app">
 
-<div class="card" id="pwresetcard" style="display:none;border-color:var(--warn)">
-  <div class="row" style="justify-content:space-between;margin-bottom:8px">
-    <b style="font-size:14px">Cambiar contraseña de acceso web</b>
-    <button class="ghost sm" onclick="togglePwReset()">✕ Cerrar</button>
+<div class="card s3 hide" id="pwresetcard">
+  <div class="row s12">
+    <b class="s13">Cambiar contraseña de acceso web</b>
+    <button class="ghost sm" data-act="togglePwReset">✕ Cerrar</button>
   </div>
   <div class="sub">Exige tu contraseña actual y una nueva de al menos 12 caracteres. Invalida la anterior al instante.</div>
   <div class="row">
-    <input type="password" id="curpw" placeholder="Contraseña actual" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
-    <input type="password" id="newpw1" placeholder="Nueva (mín. 12)" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
-    <input type="password" id="newpw2" placeholder="Repetir nueva" style="flex:1;min-width:170px" onkeydown="if(event.key==='Enter')kg_reset_pw()">
-    <button class="ghost sm" type="button" onclick="toggleVis(['curpw','newpw1','newpw2'])">👁</button>
-    <button onclick="kg_reset_pw()">Actualizar clave</button>
+    <input class="s14" type="password" id="curpw" placeholder="Contraseña actual" data-enter="kg_reset_pw">
+    <input class="s14" type="password" id="newpw1" placeholder="Nueva (mín. 12)" data-enter="kg_reset_pw">
+    <input class="s14" type="password" id="newpw2" placeholder="Repetir nueva" data-enter="kg_reset_pw">
+    <button class="ghost sm" type="button" data-act="vis" data-ids="curpw,newpw1,newpw2">👁</button>
+    <button data-act="kg_reset_pw">Actualizar clave</button>
   </div>
-  <pre id="pwresetout" style="display:none"></pre>
+  <pre class="hide" id="pwresetout"></pre>
 </div>
 
 <div class="card"><div class="row">
 <span class="badge" id="dbstate">…</span>
 <span class="badge" id="count">… aliases</span>
 <span class="badge" id="dbmeta">…</span>
-<span style="flex:1"></span>
-<button class="ghost sm" onclick="load()">↻ Recargar</button>
+<span class="s15"></span>
+<button class="ghost sm" data-act="load">↻ Recargar</button>
 </div></div>
 
 <h2>Aliases y auto-relleno</h2>
 <div class="card">
-  <div class="row" style="justify-content:space-between;margin-bottom:10px">
-    <div class="sub" style="margin:0;flex:1">Marca <b>Sin aprobación</b> en una cuenta para que su relleno no pida confirmación. Solo vale para el origin exacto guardado en la URL del vault.</div>
-    <input type="search" id="aliasfilter" placeholder="🔍 Filtrar alias o grupo…" oninput="renderAliases()" style="min-width:210px">
+  <div class="row s16">
+    <div class="sub s17">Marca <b>Sin aprobación</b> en una cuenta para que su relleno no pida confirmación. Solo vale para el origin exacto guardado en la URL del vault.</div>
+    <input class="s18" type="search" id="aliasfilter" placeholder="🔍 Filtrar alias o grupo…" data-oninput="renderAliases">
   </div>
   <div id="aliases"><div class="sub">Cargando…</div></div>
 </div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
 <div class="card"><div class="sub" id="checklist">Verificando estado…</div>
-<div class="sub" style="margin:0">
+<div class="sub s1">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
 3. Abre el .kdbx en KeePassXC con ese .key, añade copias con alias opacos y URL exacta, guarda.<br>
@@ -368,31 +398,53 @@ De aquí en adelante solo repites 3–4. Sin el .key el .kdbx no se abre en ning
 <h2 id="bajar">Bajar y subir el hermes.kdbx</h2>
 <div class="card">
 <div class="row">
-<button class="ghost" onclick="dl()">⬇ Descargar .kdbx actual</button>
-<span class="sub" style="margin:0">Flujo: descarga → edita en KeePassXC (añade copias con alias opacos) → súbelo abajo. Solo viaja ciphertext; sin el .key no se abre.</span>
+<button class="ghost" data-act="dl">⬇ Descargar .kdbx actual</button>
+<span class="sub s1">Flujo: descarga → edita en KeePassXC (añade copias con alias opacos) → súbelo abajo. Solo viaja ciphertext; sin el .key no se abre.</span>
 </div>
-<div class="drop" id="drop" style="margin-top:12px">Arrastra el <code>.kdbx</code> editado aquí o haz clic para elegirlo
+<div class="drop s19" id="drop">Arrastra el <code>.kdbx</code> editado aquí o haz clic para elegirlo
 <input type="file" id="f" accept=".kdbx" class="hide"></div>
-<div class="row" style="margin-top:10px"><button id="upbtn" onclick="up()">⬆ Subir y reemplazar</button></div>
+<div class="row s20"><button id="upbtn" data-act="up">⬆ Subir y reemplazar</button></div>
 <pre id="out">Sin subidas todavía.</pre>
 </div>
 
 <h2 id="onb">Onboarding del .key</h2>
 <div class="card"><div class="row">
 <span class="badge" id="obstate">…</span>
-<button class="ghost" id="obbtn" onclick="onboard()">Descargar .key (una sola vez)</button>
-</div><div class="sub" style="margin:8px 0 0">Guárdalo con permisos 600 en tu PC editor. Tras la primera descarga este botón muere para siempre.</div></div>
+<button class="ghost" id="obbtn" data-act="onboard">Descargar .key (una sola vez)</button>
+</div><div class="sub s21">Guárdalo con permisos 600 en tu PC editor. Tras la primera descarga este botón muere para siempre.</div></div>
 
-<div class="row" style="justify-content:space-between;align-items:baseline;margin-top:22px">
-  <h2 style="margin:0">Auditoría reciente</h2>
-  <button class="ghost sm" onclick="toggleAuditRaw()" id="auditmodebtn">Ver JSON crudo</button>
+<div class="row s22">
+  <h2 class="s1">Auditoría reciente</h2>
+  <button class="ghost sm" data-act="toggleAuditRaw" id="auditmodebtn">Ver JSON crudo</button>
 </div>
 <div class="card audit" id="audit">…</div>
 
 <footer>keygate-sync · red local/Tailscale únicamente · todo cambio deja backup + audit</footer>
 </div>
 </div>
-<script>
+<script nonce="__NONCE__">
+
+// F7: sin handlers inline (CSP con nonce). Un solo listener delegado.
+document.addEventListener('click', function (e) {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act;
+  if (act === 'copy') { copyAlias(Number(el.dataset.i), el); return; }
+  if (act === 'save') { saveAuto(Number(el.dataset.i)); return; }
+  if (act === 'vis') { toggleVis((el.dataset.ids || '').split(',').filter(Boolean)); return; }
+  const fn = window[act];
+  if (typeof fn === 'function') fn.call(el, el);
+});
+document.addEventListener('input', function (e) {
+  const el = e.target.closest('[data-oninput]');
+  if (el && typeof window[el.dataset.oninput] === 'function') window[el.dataset.oninput](el);
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter') return;
+  const el = e.target.closest('[data-enter]');
+  if (el && typeof window[el.dataset.enter] === 'function') window[el.dataset.enter](el);
+});
+
 let __auditRaw = localStorage.getItem('kg_audit_raw') === '1';
 let __lastAuditLines = [];
 let __aliasRows = [];
@@ -411,30 +463,30 @@ function checkSetupHint() {
   const a = (document.getElementById('pw1').value || '');
   const b = (document.getElementById('pw2').value || '');
   const h = document.getElementById('setuphint');
-  if (!a.length) { h.textContent = 'Longitud: 0 / 12 caracteres mínimo.'; h.style.color = 'var(--mut)'; return; }
-  if (a.length < 12) { h.textContent = `Longitud: ${a.length} / 12 (faltan ${12 - a.length}).`; h.style.color = 'var(--warn)'; return; }
-  if (b && a !== b) { h.textContent = 'Longitud OK, pero las contraseñas aún no coinciden.'; h.style.color = 'var(--bad)'; return; }
+  if (!a.length) { h.textContent = 'Longitud: 0 / 12 caracteres mínimo.'; h.dataset.tone = 'mut'; return; }
+  if (a.length < 12) { h.textContent = `Longitud: ${a.length} / 12 (faltan ${12 - a.length}).`; h.dataset.tone = 'warn'; return; }
+  if (b && a !== b) { h.textContent = 'Longitud OK, pero las contraseñas aún no coinciden.'; h.dataset.tone = 'bad'; return; }
   h.textContent = b ? '✅ Contraseña válida y coincide.' : `✅ Longitud OK (${a.length} caracteres). Repítela al lado.`;
-  h.style.color = 'var(--acc)';
+  h.dataset.tone = 'acc';
 }
 function logout(){ sessionStorage.removeItem('kg_t'); location.reload(); }
 function showAuthedUI() {
-  document.getElementById('setupcard').style.display = 'none';
-  document.getElementById('logincard').style.display = 'none';
-  document.getElementById('app').style.display = 'block';
-  document.getElementById('userbar').style.display = 'flex';
+  document.getElementById('setupcard').classList.add('hide');
+  document.getElementById('logincard').classList.add('hide');
+  document.getElementById('app').classList.remove('hide');
+  document.getElementById('userbar').classList.remove('hide');
 }
 function togglePwReset() {
   const c = document.getElementById('pwresetcard');
-  c.style.display = (c.style.display === 'none') ? 'block' : 'none';
-  document.getElementById('pwresetout').style.display = 'none';
+  c.classList.toggle('hide');
+  document.getElementById('pwresetout').classList.add('hide');
 }
 async function kg_reset_pw() {
   const cur = document.getElementById('curpw').value;
   const n1 = document.getElementById('newpw1').value;
   const n2 = document.getElementById('newpw2').value;
   const out = document.getElementById('pwresetout');
-  out.style.display = 'block';
+  out.classList.remove('hide');
   if (!cur) { out.textContent = 'Ingresa tu contraseña actual.'; return; }
   if (n1.length < 12) { out.textContent = 'La nueva contraseña debe tener al menos 12 caracteres.'; return; }
   if (n1 !== n2) { out.textContent = 'La nueva contraseña y su confirmación no coinciden.'; return; }
@@ -458,12 +510,12 @@ async function boot() {
   try {
     const r = await fetch('/api/setup-state');
     st = await r.json();
-  } catch (e) { document.getElementById('setupout').style.display = 'block';
+  } catch (e) { document.getElementById('setupout').classList.remove('hide');
     document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
-    document.getElementById('setupcard').style.display = 'block'; return; }
-  if (st.setup_required) { document.getElementById('setupcard').style.display = 'block'; return; }
+    document.getElementById('setupcard').classList.remove('hide'); return; }
+  if (st.setup_required) { document.getElementById('setupcard').classList.remove('hide'); return; }
   // #app stays hidden until a verified login: cancelling must show nothing.
-  document.getElementById('logincard').style.display = 'block';
+  document.getElementById('logincard').classList.remove('hide');
   if (sessionStorage.getItem('kg_t')) {
     const ok = await kg_verify_token(sessionStorage.getItem('kg_t'));
     if (ok) { showAuthedUI(); load(); }
@@ -478,20 +530,20 @@ async function kg_verify_token(t) {
 async function kg_login() {
   const pw = document.getElementById('loginpw').value;
   const out = document.getElementById('loginout');
-  out.style.display = 'block';
+  out.classList.remove('hide');
   if (!pw) { out.textContent = 'Ingresa la contraseña.'; return; }
   const ok = await kg_verify_token(pw);
   if (!ok) { out.textContent = 'Contraseña incorrecta (o límite de intentos alcanzado).';
              document.getElementById('loginpw').value = ''; return; }
   sessionStorage.setItem('kg_t', pw);
   document.getElementById('loginpw').value = '';
-  out.style.display = 'none';
+  out.classList.add('hide');
   showAuthedUI();
   load();
 }
 async function kg_setup() {
   const a = document.getElementById('pw1').value, b = document.getElementById('pw2').value;
-  const out = document.getElementById('setupout'); out.style.display = 'block';
+  const out = document.getElementById('setupout'); out.classList.remove('hide');
   if (a.length < 12) { out.textContent = 'Mínimo 12 caracteres.'; return; }
   if (a !== b) { out.textContent = 'No coinciden.'; return; }
   try {
@@ -530,28 +582,28 @@ function renderAliases() {
   const q = ((document.getElementById('aliasfilter') || {}).value || '').trim().toLowerCase();
   const box = document.getElementById('aliases');
   if (!__aliasRows.length) {
-    box.innerHTML = '<div class="sub" style="margin:0">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
+    box.innerHTML = '<div class="sub s1">Vacío — sube tu primer .kdbx o añade copias en KeePassXC.</div>';
     return;
   }
   const filtered = __aliasRows.filter(r => !q || r.alias.toLowerCase().includes(q) || (r.group || '').toLowerCase().includes(q));
   if (!filtered.length) {
-    box.innerHTML = '<div class="sub" style="margin:0">Ningún alias coincide con el filtro.</div>';
+    box.innerHTML = '<div class="sub s1">Ningún alias coincide con el filtro.</div>';
     return;
   }
   box.innerHTML = filtered.map(r => {
     const i = r.idx;
     const p = r.policy;
     const val = p.enabled ? (p.origin || '') : (p.suggested_origin || '');
-    const grp = r.group ? `<span class="badge" style="margin-left:6px;font-size:11px">📁 ${esc(r.group)}</span>` : '';
-    return `<div class="alias"><div><div class="row" style="gap:6px"><b>${esc(r.alias)}</b>${grp}` +
-      `<button class="ghost sm" onclick="copyAlias(${i}, this)" title="Copiar alias para el chat">📋 Copiar</button></div>` +
+    const grp = r.group ? `<span class="badge s23">📁 ${esc(r.group)}</span>` : '';
+    return `<div class="alias"><div><div class="row s24"><b>${esc(r.alias)}</b>${grp}` +
+      `<button class="ghost sm" data-act="copy" data-i="${i}" title="Copiar alias para el chat">📋 Copiar</button></div>` +
       `<small>Hint: ${esc(r.hint)}</small></div>` +
-      `<div class="row" style="gap:6px">` +
+      `<div class="row s24">` +
       `<input type="text" id="ao_${i}" value="${esc(val)}" placeholder="https://sitio" ` +
-      `style="width:210px;padding:7px;font-size:13px">` +
-      `<label class="badge${p.enabled ? ' ok' : ''}" style="display:flex;align-items:center;gap:6px;cursor:pointer">` +
+      `class="aoin">` +
+      `<label class="badge${p.enabled ? ' ok' : ''} s25">` +
       `<input type="checkbox" id="ae_${i}" ${p.enabled ? 'checked' : ''}> Sin aprobación</label>` +
-      `<button class="ghost sm" onclick="saveAuto(${i})">Guardar</button></div></div>`;
+      `<button class="ghost sm" data-act="save" data-i="${i}">Guardar</button></div></div>`;
   }).join('');
 }
 function renderAudit() {
@@ -578,10 +630,10 @@ function renderAudit() {
       if (o.approval) details.push(`approval=${o.approval}`);
       if (o.before !== undefined && o.after !== undefined) details.push(`${o.before}→${o.after} entries`);
       if (o.sha256) details.push(`sha256=${o.sha256}`);
-      return `<div class="audit-row"><span style="color:var(--mut);min-width:145px">${esc(dt)}</span>` +
+      return `<div class="audit-row"><span class="s26">${esc(dt)}</span>` +
         `<span class="badge">${esc(ev)}</span>` +
         (dec ? `<span class="badge ${bcls}">${esc(dec)}</span>` : '') +
-        `<span style="color:var(--txt)">${esc(details.join(' · '))}</span></div>`;
+        `<span class="s27">${esc(details.join(' · '))}</span></div>`;
     } catch (e) {
       return `<div class="audit-row">${esc(l)}</div>`;
     }
@@ -780,13 +832,19 @@ class Handler(BaseHTTPRequestHandler):
         raw = vals[0].strip().lower()
         return bool(raw) and raw in _ALLOWED_HOSTS
 
-    def _send_sec_headers(self, no_store: bool = True) -> None:
+    def _send_sec_headers(self, no_store: bool = True, nonce: str = "") -> None:
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        # Sin 'unsafe-inline' (F7): el HTML lleva un <script>/<style> con nonce
+        # por respuesta y ningún handler inline ni atributo style="".
+        if nonce:
+            script_style = f"'nonce-{nonce}'"
+        else:
+            script_style = "'none'"  # respuestas JSON: no necesitan scripts
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+            f"default-src 'self'; style-src {script_style}; script-src {script_style}; "
             "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
             "base-uri 'none'; form-action 'self'",
         )
@@ -918,9 +976,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self._rate_ok():
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
-            body = INDEX_HTML.encode()
+            nonce = secrets.token_urlsafe(16)
+            body = INDEX_HTML.replace("__NONCE__", nonce).encode()
             self.send_response(200)
-            self._send_sec_headers(no_store=True)
+            self._send_sec_headers(no_store=True, nonce=nonce)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
