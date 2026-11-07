@@ -4,6 +4,14 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.12 — 2026-11-07
+- **`scripts/keygate-vault` — cifrado en reposo de SOLO los dos archivos**: la
+  DB y la keyfile se guardan como `hermes.kdbx.gpg` + `agent.key.gpg`
+  (AES-256, 0600) en `~/.keygate-vault`; el resto de `Documentos` no se toca.
+  `open -- CMD` descifra ambos a tmpfs, exporta `KEYGATE_DB`/`KEYGATE_KEYFILE`,
+  ejecuta el comando y los destruye al salir. Sin `open` no hay vault usable
+  (fail-closed). `status` muestra qué está cifrado y si algo quedó abierto.
+
 ## 0.6.11 — 2026-11-07
 - **`scripts/keygate-unlock` — modo escrow de la keyfile**: la `.key` se guarda
   cifrada con gpg (AES-256) fuera del equipo y solo se materializa en tmpfs

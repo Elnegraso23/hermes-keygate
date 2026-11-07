@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# keygate-vault — cifra en reposo SOLO los dos archivos del vault (hermes.kdbx
+# y la keyfile), sin tocar el resto de Documentos, y los abre en tmpfs solo
+# mientras corre el comando.
+#
+#   keygate-vault seal            cifra DB+key -> ~/.keygate-vault/*.gpg (0600)
+#   keygate-vault open -- CMD     descifra ambos a /dev/shm, ejecuta CMD, borra
+#   keygate-vault status          qué hay cifrado y si hay algo abierto
+#
+# La passphrase se pide por TTY y se pasa a gpg por descriptor, nunca por argv.
+# Sin `open`, los .gpg no se pueden usar: es fail-closed por diseño.
+set -euo pipefail
+
+PROG="$(basename "$0")"
+HOME_DIR="${HOME:?}"
+VAULT_DIR="${KEYGATE_VAULT_DIR:-$HOME_DIR/.keygate-vault}"
+DB="${KEYGATE_DB:-$HOME_DIR/Documentos/hermes.kdbx}"
+KFD="${KEYGATE_KEYFILE:-$HOME_DIR/.keepass-agent.key}"
+SHM="${KEYGATE_SHM:-/dev/shm}"
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+need_gpg() { command -v gpg >/dev/null || die "falta gpg"; }
+
+usage() { sed -n '2,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+seal() {
+  need_gpg
+  [ -f "$DB" ] || die "no existe la DB: $DB"
+  [ -f "$KFD" ] || die "no existe la keyfile: $KFD"
+  mkdir -p "$VAULT_DIR"; chmod 700 "$VAULT_DIR"
+  [ -e "$VAULT_DIR/hermes.kdbx.gpg" ] && die "ya hay un vault sellado en $VAULT_DIR (no sobrescribo)"
+  printf 'Passphrase nueva para el vault cifrado: '; read -r -s -p "" P1; echo >&2
+  printf 'Repítela: '; read -r -s -p "" P2; echo >&2
+  [ "$P1" = "$P2" ] || die "no coinciden"
+  [ ${#P1} -ge 12 ] || die "usa al menos 12 caracteres"
+  for pair in "$DB:hermes.kdbx.gpg" "$KFD:agent.key.gpg"; do
+    src="${pair%%:*}"; dst="$VAULT_DIR/${pair##*:}"
+    gpg --batch --yes --quiet --symmetric --cipher-algo AES256 --s2k-mode 3 \
+        --s2k-count 65011712 --pinentry-mode loopback --passphrase-fd 3 \
+        -o "$dst" "$src" 3< <(printf '%s' "$P1") || die "fallo al cifrar $src"
+    chmod 600 "$dst"
+  done
+  unset P1 P2
+  printf '%s: sellado en %s\n' "$PROG" "$VAULT_DIR" >&2
+  printf '%s: los originales siguen ahí. Cuando verifiques que abre, bórralos:\n' "$PROG" >&2
+  printf '  shred -u %q %q\n' "$DB" "$KFD" >&2
+}
+
+open_run() {
+  need_gpg
+  [ -f "$VAULT_DIR/hermes.kdbx.gpg" ] || die "no hay vault sellado en $VAULT_DIR"
+  [ -d "$SHM" ] || die "$SHM no existe"
+  W="$(mktemp -d "$SHM/keygate-vault.XXXXXXXX")"; chmod 700 "$W"
+  DB_TMP="$W/hermes.kdbx"; KF_TMP="$W/agent.key"
+  cleanup() {
+    set +e
+    for f in "$DB_TMP" "$KF_TMP"; do [ -f "$f" ] && shred -u -n 1 "$f" 2>/dev/null; done
+    rm -rf "$W" 2>/dev/null
+    unset KEYGATE_DB KEYGATE_KEYFILE 2>/dev/null
+  }
+  trap cleanup EXIT INT TERM HUP
+  printf 'Passphrase del vault: '; read -r -s -p "" P; echo >&2
+  gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 -d \
+      -o "$DB_TMP" "$VAULT_DIR/hermes.kdbx.gpg" 3< <(printf '%s' "$P") || die "passphrase incorrecta o vault dañado"
+  gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 -d \
+      -o "$KF_TMP" "$VAULT_DIR/agent.key.gpg" 3< <(printf '%s' "$P") || die "passphrase incorrecta o key dañada"
+  unset P
+  chmod 600 "$DB_TMP" "$KF_TMP"
+  printf '%s: vault abierto en tmpfs (%s) — ejecutando: %s\n' "$PROG" "$W" "$*" >&2
+  KEYGATE_DB="$DB_TMP" KEYGATE_KEYFILE="$KF_TMP" KEYGATE_EPHEMERAL=1 "$@"
+  RC=$?
+  printf '%s: comando terminó con %s; cerrando y borrando el vault temporal\n' "$PROG" "$RC" >&2
+  exit "$RC"
+}
+
+status() {
+  printf 'dir cifrado : %s\n' "$VAULT_DIR"
+  if [ -d "$VAULT_DIR" ]; then
+    ls -l "$VAULT_DIR" 2>/dev/null | sed 's/^/  /'
+  else
+    printf '  (no existe todavía)\n'
+  fi
+  printf 'DB original : %s %s\n' "$DB" "$([ -f "$DB" ] && echo '[presente]' || echo '[ausente]')"
+  printf 'key original: %s %s\n' "$KFD" "$([ -f "$KFD" ] && echo '[presente]' || echo '[ausente]')"
+  printf 'montados    : '; ls -d "$SHM"/keygate-vault.* 2>/dev/null || echo "ninguno"
+}
+
+case "${1:-}" in
+  seal) shift; seal ;;
+  open) shift; [ "${1:-}" = "--" ] && shift; [ $# -gt 0 ] || die "falta el comando tras --"; open_run "$@" ;;
+  status) shift; status ;;
+  -h|--help|"") usage 0 ;;
+  *) die "acción desconocida: $1 (usa --help)" ;;
+esac

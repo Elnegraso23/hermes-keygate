@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.11-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.12-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
 [![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.11) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.6.12) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -544,7 +544,6 @@ deja crear otra. Nunca por chat.
   todo el vault, solo API keys necesarias.
 
 ## Modo escrow: la keyfile fuera del equipo
-
 El vault operativo es *keyfile-only*: si el `.kdbx` y el `.key` están juntos en
 disco, quien tenga acceso físico o root tiene el vault abierto. El modo escrow
 rompe eso: el `.key` queda **cifrado con passphrase (AES-256, gpg)** y fuera del
@@ -568,6 +567,30 @@ TTY y se pasa a gpg por descriptor de fichero (no por `argv`, no queda en
 host ya comprometido, root puede leerla de la memoria del proceso; y mientras el
 comando corre, la keyfile existe en RAM. Es un control contra robo del disco o
 de la copia en reposo, no contra un root activo.
+
+## Cifrado en reposo de solo los dos archivos (`keygate-vault`)
+
+Sin nube y sin cifrar carpetas enteras: se cifran **únicamente** `hermes.kdbx` y
+la keyfile.
+
+```bash
+scripts/keygate-vault seal     # pide passphrase (>=12) y crea ~/.keygate-vault/*.gpg
+scripts/keygate-vault status   # qué está cifrado y si algo quedó abierto
+scripts/keygate-vault open -- python3 sync/keygate_sync.py   # abre en tmpfs y sirve la web
+```
+
+`open` descifra ambos a `/dev/shm` (0700/0600), ejecuta el comando y los borra al
+salir. Sin `open` no hay vault usable: el `.kdbx` cifrado no se abre solo, así
+que el fallo es cerrado.
+
+**Consecuencia operativa, dicha sin adornos**: el servicio web solo existe
+mientras ese `open` corre. Si lo quieres en systemd, el `ExecStart` va dentro de
+`keygate-vault open` y hay que teclear la passphrase al arrancarlo — no hay
+desbloqueo automático sin guardar la passphrase en disco, que es exactamente lo
+que estamos evitando.
+
+`seal` **no borra nada**: imprime el `shred -u` que debes ejecutar tú cuando
+confirmes que `open` abre tu base.
 
 ## Licencia
 

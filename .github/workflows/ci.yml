@@ -49,7 +49,7 @@ jobs:
           echo "compila OK"
       - name: Bash sintaxis de los scripts
         run: |
-          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull scripts/keygate-test scripts/keygate-unlock; do
+          for f in scripts/*.sh scripts/keygate-setup scripts/keygate-update scripts/keygate-fetch scripts/keygate-push scripts/keygate-pull scripts/keygate-test scripts/keygate-unlock scripts/keygate-vault; do
             bash -n "$f" || exit 1
           done
           echo "scripts OK"
