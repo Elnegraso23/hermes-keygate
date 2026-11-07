@@ -74,7 +74,7 @@ def set_password(password: str) -> None:
     meta["salt"] = base64.b64encode(salt).decode()
     meta["hash"] = _hash(password, salt)
     meta.setdefault("port", DEFAULT_PORT)
-    meta.setdefault("bind", "0.0.0.0")
+    meta.setdefault("bind", "127.0.0.1")
     meta["created"] = meta.get("created", int(time.time()))
     meta["rotated"] = int(time.time())
     _save_meta(meta)
@@ -119,8 +119,10 @@ def apply_toggle(alias: str, enable: bool) -> bool:
 def url_for(alias: str = "") -> str:
     meta = _load_meta()
     port = int(meta.get("port") or DEFAULT_PORT)
-    bind = str(meta.get("bind") or "0.0.0.0")
-    if bind in ("0.0.0.0", "::", ""):
+    bind = str(meta.get("bind") or "127.0.0.1")
+    if bind in ("127.0.0.1", "localhost", "::1"):
+        host = bind
+    elif bind in ("0.0.0.0", "::", ""):  # nosec B104 - comparación, no bind: LAN es opt-in explícito
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             s.connect(("192.168.0.1", 9))
@@ -265,7 +267,11 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(_render(msg))
 
 
-def serve(bind: str = "0.0.0.0", port: int = DEFAULT_PORT) -> None:
+def serve(bind: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:
+    """Bind locally by default; pass --bind 0.0.0.0 (or a tailnet IP) for LAN.
+
+    LAN se habilita sólo con --bind explícito: nunca por defecto.
+    """
     meta = _load_meta()
     meta.update({"bind": bind, "port": port, "updated": int(time.time())})
     _save_meta(meta)
@@ -289,7 +295,7 @@ def _cli(argv) -> int:
         print(json.dumps({"ok": True, "meta": str(meta_path())}))
         return 0
     if cmd == "serve":
-        bind, port = "0.0.0.0", DEFAULT_PORT
+        bind, port = "127.0.0.1", DEFAULT_PORT
         args = argv[2:]
         for i, a in enumerate(args):
             if a == "--bind" and i + 1 < len(args):
