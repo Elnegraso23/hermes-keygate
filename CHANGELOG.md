@@ -11,6 +11,8 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
   `open -- CMD` descifra ambos a tmpfs, exporta `KEYGATE_DB`/`KEYGATE_KEYFILE`,
   ejecuta el comando y los destruye al salir. Sin `open` no hay vault usable
   (fail-closed). `status` muestra qué está cifrado y si algo quedó abierto.
+  `--ttl N` agrega un vigilante que borra el vault temporal aunque el wrapper
+  muera con SIGKILL (el trap no corre en ese caso).
 
 ## 0.6.11 — 2026-11-07
 - **`scripts/keygate-unlock` — modo escrow de la keyfile**: la `.key` se guarda

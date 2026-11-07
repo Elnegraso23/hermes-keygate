@@ -47,6 +47,8 @@ seal() {
 }
 
 open_run() {
+  local ttl="${1:-0}"
+  shift || true   # consume el argumento TTL
   need_gpg
   [ -f "$VAULT_DIR/hermes.kdbx.gpg" ] || die "no hay vault sellado en $VAULT_DIR"
   [ -d "$SHM" ] || die "$SHM no existe"
@@ -59,6 +61,10 @@ open_run() {
     unset KEYGATE_DB KEYGATE_KEYFILE 2>/dev/null
   }
   trap cleanup EXIT INT TERM HUP
+  # TTL: si el wrapper muere con SIGKILL (el trap no corre), el vigilante borra.
+  if [ "$ttl" -gt 0 ]; then
+    ( sleep "$ttl"; [ -d "$W" ] && { printf '%s: TTL %ss agotado, borrando el vault temporal\n' "$PROG" "$ttl" >&2; cleanup; } ) &
+  fi
   printf 'Passphrase del vault: '; read -r -s -p "" P; echo >&2
   gpg --batch --yes --quiet --pinentry-mode loopback --passphrase-fd 3 -d \
       -o "$DB_TMP" "$VAULT_DIR/hermes.kdbx.gpg" 3< <(printf '%s' "$P") || die "passphrase incorrecta o vault dañado"
@@ -87,7 +93,13 @@ status() {
 
 case "${1:-}" in
   seal) shift; seal ;;
-  open) shift; [ "${1:-}" = "--" ] && shift; [ $# -gt 0 ] || die "falta el comando tras --"; open_run "$@" ;;
+  open)
+    shift
+    TTL=0
+    if [ "${1:-}" = "--ttl" ]; then TTL="${2:?}"; shift 2; fi
+    [ "${1:-}" = "--" ] && shift
+    [ $# -gt 0 ] || die "falta el comando tras --"
+    open_run "$TTL" "$@" ;;
   status) shift; status ;;
   -h|--help|"") usage 0 ;;
   *) die "acción desconocida: $1 (usa --help)" ;;
