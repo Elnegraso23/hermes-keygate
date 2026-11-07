@@ -838,7 +838,9 @@ def unlock_vault(passphrase: str) -> tuple:
     key_blob = vdir / "agent.key.gpg"
     if not db_blob.is_file() or not key_blob.is_file():
         return False, "vault not sealed", 0
-    shm = Path(os.environ.get("KEYGATE_SHM", "/dev/shm"))
+    # /dev/shm es tmpfs y es lo que queremos: el vault descifrado no debe
+    # tocar disco. mkdtemp crea con 0700 y nombre aleatorio.
+    shm = Path(os.environ.get("KEYGATE_SHM", "/dev/shm"))  # nosec B108
     try:
         work = Path(tempfile.mkdtemp(prefix="keygate-live.", dir=str(shm)))
         os.chmod(work, 0o700)
