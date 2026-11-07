@@ -189,7 +189,7 @@ After=network-online.target
 [Service]
 Type=simple
 Environment=HERMES_HOME=$HOME/.hermes
-ExecStart=$PY_BIN $REPO/keygate_web.py serve --bind ${BIND} --port ${ALIAS_PORT}
+ExecStart=$PY_BIN $DEST/keygate_web.py serve --bind ${BIND} --port ${ALIAS_PORT}
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
@@ -200,7 +200,16 @@ WantedBy=default.target
 UNIT2EOF
     systemctl --user daemon-reload 2>/dev/null || true
     systemctl --user enable --now keygate-alias-page.service 2>/dev/null || true
-    if curl -fsS -m 3 "http://${BIND}:${ALIAS_PORT}/healthz" >/dev/null 2>&1; then
+    # Reintento: `enable --now` vuelve antes de que el socket escuche; un curl
+    # inmediato daba un falso "no respondió" en la instalación desde cero.
+    ALIAS_OK=0
+    for _ in $(seq 1 25); do
+      sleep 0.4
+      if curl -fsS -m 3 "http://${BIND}:${ALIAS_PORT}/healthz" >/dev/null 2>&1; then
+        ALIAS_OK=1; break
+      fi
+    done
+    if [ "$ALIAS_OK" = 1 ]; then
       say "página de alias viva en http://${BIND}:${ALIAS_PORT} (pide contraseña)"
     else
       say "(!) página de alias no respondió — journalctl --user -u keygate-alias-page"
