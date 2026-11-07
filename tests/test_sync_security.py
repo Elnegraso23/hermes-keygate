@@ -132,3 +132,17 @@ def test_server_header_does_not_leak_versions(srv):
     c.close()
     assert not any(ch.isdigit() for ch in server), server
     assert "Python" not in server, server
+
+
+def test_favicon_is_served_same_origin(srv):
+    """El icono va por /favicon.svg (img-src 'self'): sin excepciones de CSP."""
+    ks, port, _ = srv
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", "/favicon.svg", headers={"Host": f"127.0.0.1:{port}"})
+    r = c.getresponse()
+    body = r.read()
+    ctype = r.getheader("Content-Type") or ""
+    c.close()
+    assert r.status == 200
+    assert "image/svg+xml" in ctype
+    assert b"<svg" in body

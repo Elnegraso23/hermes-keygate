@@ -230,6 +230,8 @@ def parse_multipart(body: bytes, boundary: bytes):
 INDEX_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>keygate-sync</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<meta name="theme-color" content="#0d1117">
 <style nonce="__NONCE__">
 :root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--card2:#1c232d;--line:#2a3440;--txt:#e6edf3;
 --mut:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149;--btn:#2f6fed;--btn-h:#388bfd}
@@ -310,7 +312,7 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 .aoin{width:210px;padding:7px;font-size:13px}
 </style></head><body><div class="wrap">
 <header>
-  <div class="brand"><div class="logo">🔑</div><div><h1>keygate-sync</h1>
+  <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path d="M12 2 4.5 5v5.6c0 4.9 3.1 8.2 7.5 9.9 4.4-1.7 7.5-5 7.5-9.9V5L12 2Z" fill="#0b1220" opacity=".35"/><path d="M12 6.2a3.6 3.6 0 0 0-1.7 6.8v3.2a1.7 1.7 0 0 0 3.4 0v-3.2A3.6 3.6 0 0 0 12 6.2Z" fill="#fff"/></svg></div><div><h1>keygate-sync</h1>
   <div class="sub s1">Vault operativo · solo mueve ciphertext · sin passwords en esta página</div></div></div>
   <div class="topbar hide" id="userbar">
     <button class="ghost sm" data-act="togglePwReset">🔒 Cambiar clave</button>
@@ -770,6 +772,16 @@ boot();
 """
 
 
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="keygate-sync">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#2f6fed"/><stop offset="1" stop-color="#3fb950"/></linearGradient></defs>
+<rect width="64" height="64" rx="14" fill="url(#g)"/>
+<path d="M32 8 12 16v13c0 12 8.6 20.5 20 24 11.4-3.5 20-12 20-24V16L32 8Z" fill="#0b1220" opacity=".32"/>
+<path d="M32 19a9 9 0 0 0-4.3 17v7.2a4.3 4.3 0 0 0 8.6 0V36A9 9 0 0 0 32 19Zm0 4.6a4.4 4.4 0 1 1 0 8.8 4.4 4.4 0 0 1 0-8.8Z" fill="#fff"/>
+</svg>
+"""
+
+
 def _build_allowed_hosts(bind: str, port: int) -> set:
     """Exact Host header values accepted by this instance (bind IP only)."""
     hosts = set()
@@ -969,6 +981,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         db, kf, _token, _b, _p, _k = self._cfg()
         url = urlparse(self.path)
+        if url.path in ("/favicon.svg", "/favicon.ico"):
+            # Mismo origen, tipo imagen: la CSP (img-src 'self') lo permite sin
+            # excepciones. Sin secretos ni estado.
+            body = FAVICON_SVG.encode()
+            self.send_response(200)
+            self._send_sec_headers(no_store=True)
+            self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if url.path == "/":
             # Public shell on purpose: browsers can't send Authorization headers
             # on plain navigation. The page holds zero secrets; it prompts for

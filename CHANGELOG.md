@@ -4,6 +4,12 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.6.10 — 2026-11-07
+- **Icono propio**: `/favicon.svg` (escudo con ojo de cerradura, degradado
+  azul→verde) servido por el propio sync con `img-src 'self'`, más el mismo
+  vector inline en la cabecera en lugar del emoji. `<link rel="icon">` y
+  `theme-color` en el `<head>`. Test de regresión incluido.
+
 ## 0.6.9 — 2026-11-07
 - **F7 — CSP estricta sin `unsafe-inline`** (lo marcaba ZAP como 4 Medium):
   `script-src`/`style-src` pasan a `'nonce-<aleatorio por respuesta>'`. Para
