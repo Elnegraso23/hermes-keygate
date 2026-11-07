@@ -47,6 +47,11 @@ done
 echo "-- plugin"
 [ -d "$DEST" ] && say "$DEST ($(ls "$DEST"/*.py 2>/dev/null | wc -l) módulos)" || say "(no instalado)"
 
+echo "-- unidades antiguas (incluye .bak)"
+UNITBAK=()
+while IFS= read -r f; do UNITBAK+=("$f"); done < <(ls -1 "$HOME_DIR/.config/systemd/user"/keygate-*.service.bak-* 2>/dev/null)
+[ ${#UNITBAK[@]} -eq 0 ] && say "(ninguna)" || for f in "${UNITBAK[@]}"; do say "$(basename "$f")"; done
+
 echo "-- estado en ~/.hermes"
 STATE_FILES=(keygate-audit.jsonl keygate-autofill.json keygate-index.json keygate-sync-pass
              keygate-sync-bootstrap keygate-sync-noauth keygate-sync.pid keygate-version-check.json
@@ -85,6 +90,10 @@ for u in "${UNITS[@]}"; do
   else rm -f "$HOME_DIR/.config/systemd/user/$u.service"; fi
 done
 [ "$DRY" = 1 ] || systemctl --user daemon-reload >/dev/null 2>&1 || true
+
+for f in "${UNITBAK[@]}"; do
+  if [ "$DRY" = 1 ]; then echo "  [dry] rm $f"; else rm -f "$f"; fi
+done
 
 echo "-- desactivando plugin"
 run_or_echo hermes plugins disable keygate
