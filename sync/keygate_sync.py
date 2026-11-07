@@ -69,6 +69,33 @@ def passfile(home: Path) -> Path:
     return home / "keygate-sync-pass"
 
 
+def noauth_flag(home: Path) -> Path:
+    return home / "keygate-sync-noauth"
+
+
+def bind_is_loopback() -> bool:
+    """¿La web escucha sólo en esta máquina? Sólo entonces se permite no tener
+    contraseña: si es alcanzable por red, la contraseña es obligatoria."""
+    b = (os.environ.get("KEYGATE_BIND") or "127.0.0.1").strip().lower()
+    return b in ("127.0.0.1", "localhost", "::1", "")
+
+
+def noauth_allowed() -> bool:
+    """¿Se permite correr sin contraseña?
+
+    Por defecto sólo en localhost. Un dueño que decide exponerlo igual puede
+    forzarlo con KEYGATE_ALLOW_NOAUTH=1 (asume el riesgo: quien alcance el
+    puerto puede subir un .kdbx propio o bajar la .key si aún está disponible).
+    """
+    if bind_is_loopback():
+        return True
+    return (os.environ.get("KEYGATE_ALLOW_NOAUTH") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def noauth_enabled(home: Path) -> bool:
+    return noauth_allowed() and noauth_flag(home).exists()
+
+
 def db_protection(db: str, kf: str) -> dict:
     """Cómo está protegida la base: sólo keyfile, o keyfile + contraseña.
 
@@ -191,6 +218,10 @@ def set_password_once(home: Path, password: str) -> bool:
          "iters": PW_ITERS, "set_at": int(time.time())}
     pf = passfile(home)
     pf.parent.mkdir(parents=True, exist_ok=True)  # ~/.hermes puede no existir aún
+    try:
+        noauth_flag(home).unlink()
+    except Exception:
+        pass
     fd = os.open(str(pf), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "w") as f:
@@ -364,8 +395,12 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 <div class="row s6">
   <input class="s7" type="text" id="kg_bootstrap" placeholder="Código de arranque (lo imprime la consola del servidor)" autocomplete="off">
 </div>
-<div class="sub s8">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
+<div class="sub s8" id="bootstrapHint">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
 <div class="sub s9" id="setuphint">Longitud: 0 / 12 caracteres mínimo.</div>
+<div class="row s8 hide" id="skiprow">
+  <button class="ghost" type="button" data-act="kg_skip">Entrar sin contraseña</button>
+  <span class="sub s1">Sólo se ofrece si la web escucha en localhost. Sin contraseña, cualquiera con acceso a esta máquina administra el panel.</span>
+</div>
 <pre class="hide" id="setupout"></pre>
 </div>
 
@@ -547,7 +582,15 @@ async function boot() {
   } catch (e) { document.getElementById('setupout').classList.remove('hide');
     document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
     document.getElementById('setupcard').classList.remove('hide'); return; }
-  if (st.setup_required) { document.getElementById('setupcard').classList.remove('hide'); return; }
+  if (st.noauth_active) { showAuthedUI(); load(); return; }
+  if (st.setup_required) {
+    if (st.can_skip_auth) {
+      document.getElementById('skiprow').classList.remove('hide');
+      const bh = document.getElementById('bootstrapHint');
+      if (bh) bh.classList.add('hide');
+    }
+    document.getElementById('setupcard').classList.remove('hide'); return;
+  }
   // #app stays hidden until a verified login: cancelling must show nothing.
   document.getElementById('logincard').classList.remove('hide');
   if (sessionStorage.getItem('kg_t')) {
@@ -572,6 +615,18 @@ async function kg_login() {
   sessionStorage.setItem('kg_t', pw);
   document.getElementById('loginpw').value = '';
   out.classList.add('hide');
+  showAuthedUI();
+  load();
+}
+async function kg_skip() {
+  const out = document.getElementById('setupout'); out.classList.remove('hide');
+  try {
+    const r = await fetch('/api/skip-auth', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: '{}'});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.success) { out.textContent = 'No se pudo: ' + (j.error || r.status); return; }
+  } catch (e) { out.textContent = 'Servidor no responde.'; return; }
+  sessionStorage.removeItem('kg_t');
   showAuthedUI();
   load();
 }
@@ -1071,6 +1126,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(429, {"success": False, "error": "rate limited"})
             return False
         if not password_is_set(self._home()):
+            # Modo explícito "sin contraseña": sólo válido escuchando en
+            # localhost (bind_is_loopback). En red sigue siendo obligatoria.
+            if noauth_enabled(self._home()):
+                return True
             self._send(403, {"success": False, "error": "password not created yet",
                              "setup_required": True})
             return False
@@ -1134,8 +1193,33 @@ class Handler(BaseHTTPRequestHandler):
             if not self._rate_ok():
                 self._send(429, {"success": False, "error": "rate limited"})
                 return
+            home_p = self._home()
+            pw_set = password_is_set(home_p)
             self._send(200, {"success": True,
-                             "setup_required": not password_is_set(self._home())})
+                             "setup_required": not pw_set,
+                             "can_skip_auth": (not pw_set) and noauth_allowed(),
+                             "noauth_active": noauth_enabled(home_p),
+                             "bind_local": bind_is_loopback()})
+            return
+        if url.path == "/api/skip-auth":
+            # Sin contraseña: sólo si escuchamos en localhost y nadie ha
+            # reclamado todavía. Se deja constancia con un flag 0600.
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            if not noauth_allowed():
+                self._send(403, {"success": False,
+                                 "error": "sin contraseña no permitido en este bind"})
+                return
+            if password_is_set(self._home()):
+                self._send(409, {"success": False, "error": "ya hay contraseña"})
+                return
+            fp = noauth_flag(self._home())
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(fp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(str(int(time.time())))
+            self._send(200, {"success": True, "noauth": True})
             return
         if url.path == "/api/health":
             # Public by design (monitoring/startup probes): counts and flags
@@ -1312,6 +1396,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         db, kf, _token, _b, _p, keep = self._cfg()
         url = urlparse(self.path)
+        if url.path == "/api/skip-auth":
+            # Igual que el GET pero por POST (el navegador usa POST + CSRF).
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            if not self._csrf_ok(want_json=True):
+                return
+            if not noauth_allowed():
+                self._send(403, {"success": False,
+                                 "error": "sin contraseña no permitido en este bind"})
+                return
+            if password_is_set(self._home()):
+                self._send(409, {"success": False, "error": "ya hay contraseña"})
+                return
+            fp = noauth_flag(self._home())
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(fp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(str(int(time.time())))
+            self._send(200, {"success": True, "noauth": True})
+            return
         if url.path == "/api/set-password":
             # First visit only: creates the password (min 12 chars). Once set,
             # this endpoint is dead (403) — no change/reset over the web.

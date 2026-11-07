@@ -4,6 +4,16 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.1 — 2026-11-07
+- **La web puede correr sin contraseña** (opción explícita, no silenciosa).
+  Botón "Entrar sin contraseña" en la primera visita, visible sólo cuando el
+  bind es localhost o cuando el dueño lo fuerza con `KEYGATE_ALLOW_NOAUTH=1`.
+  Queda un flag 0600 (`keygate-sync-noauth`) y, en cuanto se define una
+  contraseña, el modo se desactiva solo. En red la contraseña sigue siendo la
+  regla; el override asume el riesgo a sabiendas.
+- La pista del código de un solo uso se oculta cuando el modo sin contraseña
+  está disponible: ya no hay nada que reclamar.
+
 ## 0.7.0 — 2026-11-07
 - **Contraseña maestra opcional en la base operativa** (`hermes.kdbx`). Hoy la
   DB abre sólo con la keyfile; en la instalación `scripts/keygate-setup` ahora
