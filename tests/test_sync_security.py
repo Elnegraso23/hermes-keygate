@@ -24,6 +24,9 @@ def srv(tmp_path, monkeypatch):
     home = tmp_path / "home"
     (home / ".hermes").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    # El servidor respeta HERMES_HOME: sin esto, los tests de seguridad
+    # apuntarían al ~/.hermes real (y fallarían si ya hay contraseña).
+    monkeypatch.setenv("HERMES_HOME", str(home / ".hermes"))
     monkeypatch.setenv("KEYGATE_DB", str(tmp_path / "vault.kdbx"))
     monkeypatch.setenv("KEYGATE_KEYFILE", str(tmp_path / "vault.key"))
     monkeypatch.setenv("KEYGATE_BIND", "127.0.0.1")
@@ -66,13 +69,21 @@ def test_cross_origin_is_rejected(srv):
     assert status == 403
 
 
-def test_same_origin_without_bootstrap_is_rejected(srv):
+def test_same_origin_without_bootstrap_is_allowed(srv):
+    """Decisión del dueño: sin código de arranque, el primero que abre la
+    página define la contraseña. Lo que sigue protegiendo es CSRF (mismo
+    origen) y que el endpoint muera en cuanto hay contraseña."""
     ks, port, _ = srv
     status, body = _post(port, {"password": "clave-de-prueba-123"},
                          {"Origin": f"http://127.0.0.1:{port}",
                           "Sec-Fetch-Site": "same-origin"})
-    assert status == 403
-    assert b"bootstrap" in body
+    assert status == 200, body
+    # segunda vez: ya hay contraseña y sin modo noauth => cerrado
+    status2, body2 = _post(port, {"password": "otra-clave-123456"},
+                           {"Origin": f"http://127.0.0.1:{port}",
+                            "Sec-Fetch-Site": "same-origin"})
+    assert status2 == 403
+    assert b"already set" in body2
 
 
 def test_bootstrap_code_is_single_use(srv):
@@ -82,6 +93,7 @@ def test_bootstrap_code_is_single_use(srv):
     ok_headers = {"Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"}
     status, _ = _post(port, {"password": "clave-de-prueba-123", "bootstrap": code}, ok_headers)
     assert status == 200
+    # el código ya no es necesario; lo que importa es que el endpoint se cierre
     # code consumed: file gone, endpoint dead
     assert not (home / ".hermes" / "keygate-sync-bootstrap").exists()
     status2, body2 = _post(port, {"password": "otra-clave-123456", "bootstrap": code}, ok_headers)
@@ -89,12 +101,14 @@ def test_bootstrap_code_is_single_use(srv):
     assert b"already set" in body2
 
 
-def test_bootstrap_compare_is_exact(srv):
+def test_bootstrap_field_is_ignored(srv):
+    """El campo 'bootstrap' ya no se exige ni se valida: se acepta igual un
+    valor inventado (documenta la decisión, no un descuido)."""
     ks, port, home = srv
     ks.bootstrap_ensure(home / ".hermes", show=False)
-    status, _ = _post(port, {"password": "clave-de-prueba-123", "bootstrap": "adivinanza"},
-                      {"Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"})
-    assert status == 403
+    status, body = _post(port, {"password": "clave-de-prueba-123", "bootstrap": "adivinanza"},
+                         {"Origin": f"http://127.0.0.1:{port}", "Sec-Fetch-Site": "same-origin"})
+    assert status == 200, body
 
 
 def test_duplicate_host_header_is_rejected(srv):
