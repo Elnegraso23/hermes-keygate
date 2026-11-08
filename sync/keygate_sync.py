@@ -1617,6 +1617,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._send(400, {"success": False, "error": "bad json"})
                 return
+            if "protect" not in body:
+                self._send(400, {"success": False, "error": "falta 'protect'"})
+                return
             protect = bool(body.get("protect"))
             if protect:
                 res = set_db_master_password(db, kf, str(body.get("password") or ""))
