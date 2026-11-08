@@ -213,23 +213,11 @@ fi
 # Bind: tailnet si existe, si no 127.0.0.1. Nunca 0.0.0.0 por defecto.
 ALIAS_PORT="${KEYGATE_ALIAS_PORT:-8790}"
 if [ "${KEYGATE_ALIAS_PAGE:-1}" != "0" ]; then
-  PW_FILE="$HOME/.hermes/keygate-alias-page-pass"
-  if [ "$NOWEB" = 1 ]; then
-    say "página de alias SIN contraseña (misma decisión que la web)"
-  elif [ ! -f "$HOME/.hermes/keygate-web.meta.json" ]; then
-    if [ -t 0 ]; then
-      python3 "$DEST/keygate_web.py" init || say "(!) sin contrasena de pagina"
-    else
-      TMPPW="$(head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 24)"
-      if printf '%s\n' "$TMPPW" | HERMES_HOME="$HOME/.hermes" python3 "$DEST/keygate_web.py" init --from-stdin >/dev/null; then
-        printf '%s\n' "$TMPPW" > "$PW_FILE"
-        chmod 600 "$PW_FILE"
-        say "contrasena de la pagina en $PW_FILE (0600) - cambiala con: python3 $DEST/keygate_web.py set-password"
-      else
-        say "(!) no se pudo crear la contrasena de la pagina"
-      fi
-      unset TMPPW
-    fi
+  # La contraseña de esta página es LA MISMA que la de keygate-sync (la define
+  # el usuario en el paso 1 del asistente). No se genera ninguna aquí: cero
+  # secretos automáticos en disco.
+  if [ "$NOWEB" != 1 ]; then
+    say "página de alias: usa la contraseña de la web (la defines en el navegador)"
   fi
   UNIT2="$UNIT_DIR/keygate-alias-page.service"
   if command -v systemctl >/dev/null 2>&1; then

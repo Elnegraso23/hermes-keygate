@@ -4,6 +4,24 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.6 — 2026-11-07
+- **Asistente de dos pasos, sin código de arranque.** Al entrar por primera vez:
+  1) contraseña de la web (mín. 12, dos veces); 2) protección de la base, con
+  las dos opciones explícitas — *sin contraseña (solo .key)* o *keyfile +
+  contraseña maestra*. Después, el panel normal.
+  Se eliminaron el campo y el texto del "código de un solo uso" y el contador
+  de longitud; sin código, el primero que abre la página define la contraseña
+  (queda auditado con el origen).
+- **Una sola contraseña para las dos páginas**: `:8790` valida contra la de
+  keygate-sync. El instalador ya no genera `keygate-alias-page-pass` (cero
+  secretos automáticos).
+- **`showStep2()` + delegación de `change`**: el paso 2 no conectaba los radios
+  cuando se llegaba pulsando "Crear" (solo al recargar), así que el campo de
+  contraseña quedaba bloqueado. Ahora se engancha por los dos caminos y además
+  por delegación (`data-oninput`).
+- `_home()` del servidor respeta `HERMES_HOME`: una instancia de prueba ya no
+  puede escribir en el `~/.hermes` real.
+
 ## 0.7.5 — 2026-11-07
 - **La web también deja elegir las contraseñas** (no sólo la terminal). Tarjeta
   "Configurar contraseñas" con dos acciones:

@@ -479,21 +479,14 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 </header>
 
 <div class="card s3 hide" id="setupcard">
-<h2 class="s4">Crea tu contraseña (primera y única vez)</h2>
-<div class="sub">No hay contraseña por defecto. Mínimo 12 caracteres. Se guarda con PBKDF2 en el host; aquí solo vive en esta pestaña.</div>
+<h2 class="s4">Paso 1 — contraseña de la web</h2>
+<div class="sub">Con esta contraseña entras al panel para configurar todo. Mínimo 12 caracteres. No se guarda en claro: solo su hash PBKDF2 en este equipo.</div>
 <div class="row">
-  <input class="s5" type="password" id="pw1" placeholder="Nueva contraseña (mín. 12)"
-   data-oninput="checkSetupHint" data-enter="kg_setup">
-  <input class="s5" type="password" id="pw2" placeholder="Repítela"
-   data-oninput="checkSetupHint" data-enter="kg_setup">
+  <input class="s5" type="password" id="pw1" placeholder="Contraseña (mín. 12)" data-enter="kg_setup" autocomplete="new-password">
+  <input class="s5" type="password" id="pw2" placeholder="Repítela" data-enter="kg_setup" autocomplete="new-password">
   <button class="ghost sm" type="button" data-act="vis" data-ids="pw1,pw2" title="Mostrar/ocultar">👁</button>
   <button data-act="kg_setup">Crear</button>
 </div>
-<div class="row s6">
-  <input class="s7" type="text" id="kg_bootstrap" placeholder="Código de arranque (lo imprime la consola del servidor)" autocomplete="off">
-</div>
-<div class="sub s8" id="bootstrapHint">El código de un solo uso está en la terminal donde corre keygate-sync y en <code>~/.hermes/keygate-sync-bootstrap</code>. Sin él nadie puede reclamar esta primera visita.</div>
-<div class="sub s9" id="setuphint">Longitud: 0 / 12 caracteres mínimo.</div>
 <div class="row s8 hide" id="skiprow">
   <button class="ghost" type="button" data-act="kg_skip">Entrar sin contraseña</button>
   <span class="sub s1">Sólo se ofrece si la web escucha en localhost. Sin contraseña, cualquiera con acceso a esta máquina administra el panel.</span>
@@ -502,10 +495,10 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 </div>
 
 <div class="card s3 hide" id="step2card">
-<h2 class="s4">Paso 2 — ¿proteges la base de datos?</h2>
-<div class="sub">Tu <code>hermes.kdbx</code> se abre con la keyfile (<code>.key</code>). Puedes exigir además una contraseña maestra: si alguien consigue la base y la keyfile juntas, sin esa contraseña no entra.</div>
-<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_key" checked> Solo keyfile (.key) — abre sin pedir nada</label></div>
-<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_pass"> Keyfile + contraseña maestra — la pides al abrir</label></div>
+<h2 class="s4">Paso 2 — Protección de la base de datos</h2>
+<div class="sub">Tu <code>hermes.kdbx</code> guarda tus cuentas. Elige cómo se abre. Después podrás añadir o quitar la contraseña maestra desde KeePassXC.</div>
+<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_key" data-oninput="syncDbPwField" checked> <b>Sin contraseña (solo .key)</b> — la base abre sin pedir nada. Quien tenga el archivo y la .key, entra.</label></div>
+<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_pass" data-oninput="syncDbPwField"> <b>Con contraseña maestra (keyfile + contraseña)</b> — además de la .key se pide una contraseña. Protege si te roban base y .key juntas.</label></div>
 <div class="row">
   <input class="s5" type="password" id="dbpw1" placeholder="Contraseña maestra (mín. 8)" autocomplete="new-password" disabled>
   <button data-act="kg_wizard_db">Continuar</button>
@@ -619,6 +612,10 @@ document.addEventListener('input', function (e) {
   const el = e.target.closest('[data-oninput]');
   if (el && typeof window[el.dataset.oninput] === 'function') window[el.dataset.oninput](el);
 });
+document.addEventListener('change', function (e) {
+  const el = e.target.closest('[data-oninput]');
+  if (el && typeof window[el.dataset.oninput] === 'function') window[el.dataset.oninput](el);
+});
 document.addEventListener('keydown', function (e) {
   if (e.key !== 'Enter') return;
   const el = e.target.closest('[data-enter]');
@@ -638,16 +635,6 @@ function toggleVis(ids) {
     const el = document.getElementById(id);
     if (el) el.type = (el.type === 'password') ? 'text' : 'password';
   });
-}
-function checkSetupHint() {
-  const a = (document.getElementById('pw1').value || '');
-  const b = (document.getElementById('pw2').value || '');
-  const h = document.getElementById('setuphint');
-  if (!a.length) { h.textContent = 'Longitud: 0 / 12 caracteres mínimo.'; h.dataset.tone = 'mut'; return; }
-  if (a.length < 12) { h.textContent = `Longitud: ${a.length} / 12 (faltan ${12 - a.length}).`; h.dataset.tone = 'warn'; return; }
-  if (b && a !== b) { h.textContent = 'Longitud OK, pero las contraseñas aún no coinciden.'; h.dataset.tone = 'bad'; return; }
-  h.textContent = b ? '✅ Contraseña válida y coincide.' : `✅ Longitud OK (${a.length} caracteres). Repítela al lado.`;
-  h.dataset.tone = 'acc';
 }
 function logout(){ sessionStorage.removeItem('kg_t'); location.reload(); }
 function showAuthedUI() {
@@ -696,11 +683,16 @@ async function boot() {
   window.__noauth = !!st.noauth_active;
   let wz = {};
   try { wz = await (await fetch('/api/wizard-state')).json(); } catch (e) { wz = {}; }
-  if (wz.needs === 'db') {
-    document.getElementById('setupcard').classList.add('hide');
-    document.getElementById('step2card').classList.remove('hide');
+  if (wz.needs === 'web') {
+    // Paso 1 siempre manda: sin contraseña de web no se entra al panel.
+    if (wz.can_skip_web) {
+      document.getElementById('skiprow').classList.remove('hide');
+    }
+    document.getElementById('step2card').classList.add('hide');
+    document.getElementById('setupcard').classList.remove('hide');
     return;
   }
+  if (wz.needs === 'db') { showStep2(); return; }
   if (st.noauth_active) {
     showAuthedUI();
     // Sin contraseña no hay nada que cambiar ni sesión que cerrar.
@@ -714,8 +706,6 @@ async function boot() {
   if (st.setup_required) {
     if (st.can_skip_auth) {
       document.getElementById('skiprow').classList.remove('hide');
-      const bh = document.getElementById('bootstrapHint');
-      if (bh) bh.classList.add('hide');
     }
     document.getElementById('setupcard').classList.remove('hide'); return;
   }
@@ -789,21 +779,32 @@ async function kg_setup() {
   try {
     const r = await fetch('/api/set-password', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({password: a,
-        bootstrap: (document.getElementById('kg_bootstrap') || {}).value || ''})});
+      body: JSON.stringify({password: a})});
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { out.textContent = 'Falló: ' + (j.error || r.status); return; }
   } catch (e) { out.textContent = 'Servidor no responde.'; return; }
   sessionStorage.setItem('kg_t', a);
   document.getElementById('pw1').value = document.getElementById('pw2').value = '';
   const st = await (await fetch('/api/wizard-state')).json().catch(() => ({}));
-  if (st.needs === 'db') {
-    document.getElementById('setupcard').classList.add('hide');
-    document.getElementById('step2card').classList.remove('hide');
-    return;
-  }
+  if (st.needs === 'db') { showStep2(); return; }
   showAuthedUI();
   load();
+}
+function showStep2() {
+  document.getElementById('setupcard').classList.add('hide');
+  document.getElementById('step2card').classList.remove('hide');
+  ['dbp_key', 'dbp_pass'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.onchange = syncDbPwField; el.addEventListener('change', syncDbPwField); }
+  });
+  syncDbPwField();
+}
+function syncDbPwField() {
+  const pass = document.getElementById('dbp_pass').checked;
+  const f = document.getElementById('dbpw1');
+  if (!f) return;
+  f.disabled = !pass;
+  if (!pass) f.value = '';
 }
 async function kg_wizard_db() {
   const out = document.getElementById('step2out'); out.classList.remove('hide');
@@ -1175,7 +1176,11 @@ class Handler(BaseHTTPRequestHandler):
         return cfg()
 
     def _home(self):
-        return Path.home() / ".hermes"
+        # HERMES_HOME manda: permite instancias de prueba (otro puerto, otro
+        # estado) sin tocar la instalación real. Antes se ignoraba y una prueba
+        # escribía contraseñas en el ~/.hermes verdadero.
+        env = os.environ.get("HERMES_HOME")
+        return Path(env) if env else Path.home() / ".hermes"
 
     def _content_length(self) -> int:
         try:
@@ -1682,17 +1687,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             # One-shot bootstrap code: proves the caller is the person running
             # the server, not a peer that merely reached the port first.
-            if not _noauth and not bootstrap_ok(self._home(), str(body_j.get("bootstrap") or "")):
-                self._send(403, {"success": False,
-                                 "error": "bootstrap code required",
-                                 "bootstrap_required": True})
-                return
+            # Sin código de arranque (decidido): el primero que abre la página
+            # define la contraseña. Queda registrado en la auditoría.
             password = str(body_j.get("password") or "")
             if len(password) < PW_MIN_LEN:
                 self._send(400, {"success": False,
                                  "error": f"password must be >= {PW_MIN_LEN} chars"})
                 return
             try:
+                kg.audit(self._home(), {"ev": "web_password",
+                                        "from": "localhost" if bind_is_loopback() else "red"})
                 if _noauth:
                     force_set_password(self._home(), password)
                 else:

@@ -90,7 +90,27 @@ def noauth_enabled() -> bool:
     return (os.environ.get("KEYGATE_ALIAS_NOAUTH") or "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _sync_passfile() -> Path:
+    return home() / "keygate-sync-pass"
+
+
 def check_password(user: str, password: str) -> bool:
+    """Una sola contraseña para las dos páginas.
+
+    Si existe la contraseña de keygate-sync (la que el usuario define en el
+    paso 1 del asistente), se valida contra ella: misma credencial en :8472 y
+    :8790. Si no existe, se usa la contraseña propia de esta página (legado).
+    """
+    sp = _sync_passfile()
+    if sp.exists():
+        try:
+            d = json.loads(sp.read_text(encoding="utf-8"))
+            salt = bytes.fromhex(d["salt"])
+            iters = int(d.get("iters") or PBKDF2_ROUNDS)
+            got = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iters).hex()
+            return hmac.compare_digest(got, str(d["hash"]))
+        except Exception:
+            return False
     meta = _load_meta()
     if not meta.get("hash") or not meta.get("salt"):
         return False
