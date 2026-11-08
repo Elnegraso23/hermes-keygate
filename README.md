@@ -99,8 +99,8 @@ bash scripts/keygate-install.sh     # hace todo; el instalador también corre el
 #          (protección de la base sin preguntar) · KEYGATE_BIND=<IP>
 #          (default: auto-detecta Tailscale)
 # Desinstalar: bash scripts/keygate-uninstall.sh [--purge] [--dry-run]
-# Elegir contraseñas DESPUÉS de instalar: bash scripts/keygate-configure
-#   (necesita TTY: las lee del teclado, nunca de un argumento)
+# Elegir contraseñas DESPUÉS de instalar: por la web (tarjeta "Configurar
+#   contraseñas") o por terminal: bash scripts/keygate-configure (necesita TTY)
 ```
 
 Lo que hace el instalador, paso por paso (a mano solo si insistes):

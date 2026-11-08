@@ -69,6 +69,63 @@ def passfile(home: Path) -> Path:
     return home / "keygate-sync-pass"
 
 
+def db_entry_count(db: str, kf: str) -> int:
+    """Cuántas entradas tiene la base. -1 si no se pudo leer."""
+    try:
+        return len(kg.list_entries(db, kf))
+    except Exception:
+        return -1
+
+
+def force_set_password(home: Path, password: str) -> bool:
+    """Define (o reemplaza) la contraseña de la web y apaga el modo sin auth."""
+    if not isinstance(password, str) or len(password) < PW_MIN_LEN:
+        return False
+    try:
+        noauth_flag(home).unlink()
+    except Exception:
+        pass
+    try:
+        passfile(home).unlink()
+    except Exception:
+        pass
+    return set_password_once(home, password)
+
+
+def set_db_master_password(db: str, kf: str, password: str) -> dict:
+    """Recrea una base VACÍA con contraseña maestra (keyfile + password).
+
+    Sólo para bases sin entradas: no se puede re-cifrar una base con datos
+    desde keepassxc-cli. La contraseña va por stdin, jamás por argv.
+    """
+    if len(password) < 8:
+        return {"success": False, "error": "contraseña demasiado corta (8+)"}
+    if db_entry_count(db, kf) not in (0,):
+        return {"success": False,
+                "error": ("la base ya tiene entradas: la contraseña maestra sólo se "
+                          "añade desde KeePassXC (Database Settings > Security)")}
+    tmp = str(Path(db).with_suffix(".new.kdbx"))
+    try:
+        proc = subprocess.run(
+            [kg._kxc(), "db-create", "--set-key-file", kf, "-p", tmp],
+            input=f"{password}\n{password}\n", capture_output=True, text=True,
+            timeout=120)
+        if proc.returncode != 0 or not Path(tmp).exists():
+            return {"success": False, "error": "db-create falló",
+                    "detail": (proc.stderr or "")[:160]}
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, db)
+        return {"success": True, "mode": "keyfile_password"}
+    except Exception as exc:
+        return {"success": False, "error": f"{exc.__class__.__name__}"}
+    finally:
+        try:
+            if Path(tmp).exists():
+                Path(tmp).unlink()
+        except Exception:
+            pass
+
+
 def noauth_flag(home: Path) -> Path:
     return home / "keygate-sync-noauth"
 
@@ -456,6 +513,20 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 <div class="card"><div class="sub" id="checklist">Verificando estado…</div></div>
 <div class="card"><b>Protección de la base</b>
 <div class="sub" id="dbprot">Comprobando…</div></div>
+
+<div class="card" id="cfgcard"><b>Configurar contraseñas</b>
+<div class="sub">Elige aquí o en la terminal (<code>scripts/keygate-configure</code>). Nunca se guardan en claro: sólo su hash.</div>
+<div class="row">
+  <input class="s5" type="password" id="newpw" placeholder="Contraseña de la web (mín. 12)" autocomplete="new-password">
+  <button data-act="kg_set_web">Definir web</button>
+</div>
+<div class="row">
+  <input class="s5" type="password" id="dbpw" placeholder="Contraseña maestra de la base (mín. 8)" autocomplete="new-password">
+  <button data-act="kg_set_db">Definir base</button>
+</div>
+<div class="sub" id="dbcfgstate">—</div>
+<pre class="hide" id="cfgout"></pre>
+</div>
 <div class="card"><div class="sub s1">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
@@ -628,6 +699,29 @@ async function kg_login() {
   showAuthedUI();
   load();
 }
+async function kg_set_web() {
+  const pw = document.getElementById('newpw').value;
+  const out = document.getElementById('cfgout'); out.classList.remove('hide');
+  if (pw.length < 12) { out.textContent = 'La contraseña de la web necesita 12+ caracteres.'; return; }
+  const r = await fetch('/api/set-password', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({password: pw})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.success) { out.textContent = 'Error: ' + (j.error || r.status); return; }
+  out.textContent = '✅ Contraseña de la web definida. Recargando…';
+  setTimeout(() => location.reload(), 900);
+}
+async function kg_set_db() {
+  const pw = document.getElementById('dbpw').value;
+  const out = document.getElementById('cfgout'); out.classList.remove('hide');
+  if (pw.length < 8) { out.textContent = 'La contraseña de la base necesita 8+ caracteres.'; return; }
+  const r = await fetch('/api/set-db-password', {method: 'POST',
+    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+    body: JSON.stringify({password: pw})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.success) { out.textContent = 'Error: ' + (j.error || r.status); return; }
+  out.textContent = '✅ Base recreada con contraseña maestra (keyfile + contraseña).';
+  load();
+}
 async function kg_skip() {
   const out = document.getElementById('setupout'); out.classList.remove('hide');
   try {
@@ -768,6 +862,12 @@ async function load() {
   } catch (e) {
     const el = document.getElementById('dbprot');
     if (el) el.textContent = 'No se pudo comprobar la protección.';
+  }
+  const cs = document.getElementById('dbcfgstate');
+  if (cs) {
+    cs.textContent = (b.items || []).length
+      ? 'La base ya tiene ' + (b.items || []).length + ' entradas: la contraseña maestra sólo se añade desde KeePassXC.'
+      : 'Base vacía: puedes definir aquí la contraseña maestra (se recrea con keyfile + contraseña).';
   }
   const af = await api('/api/autofill');
   const amap = {};
@@ -1210,6 +1310,7 @@ class Handler(BaseHTTPRequestHandler):
                              "setup_required": not pw_set,
                              "can_skip_auth": (not pw_set) and noauth_allowed(),
                              "noauth_active": noauth_enabled(home_p),
+                             "db_entries": max(0, db_entry_count(db, kf)),
                              "bind_local": bind_is_loopback()})
             return
         if url.path == "/api/skip-auth":
@@ -1428,6 +1529,28 @@ class Handler(BaseHTTPRequestHandler):
                 f.write(str(int(time.time())))
             self._send(200, {"success": True, "noauth": True})
             return
+        if url.path == "/api/set-db-password":
+            if not self._rate_ok() or not self._auth_rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            if not self._csrf_ok(want_json=True):
+                return
+            if not self._need_auth():
+                return
+            length = self._content_length()
+            if length <= 0 or length > 1024:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            pw = body.get("password") or ""
+            res = set_db_master_password(db, kf, pw)
+            kg.audit(self._home(), {"ev": "db_password", "ok": bool(res.get("success"))})
+            self._send(200 if res.get("success") else 409, res)
+            return
         if url.path == "/api/set-password":
             # First visit only: creates the password (min 12 chars). Once set,
             # this endpoint is dead (403) — no change/reset over the web.
@@ -1445,12 +1568,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._send(400, {"success": False, "error": "bad json"})
                 return
-            if password_is_set(self._home()):
+            # Con el modo sin contraseña activo, el dueño puede definirla
+            # desde la web sin código de arranque ni clave previa.
+            _noauth = noauth_enabled(self._home())
+            if password_is_set(self._home()) and not _noauth:
                 self._send(403, {"success": False, "error": "password already set"})
                 return
             # One-shot bootstrap code: proves the caller is the person running
             # the server, not a peer that merely reached the port first.
-            if not bootstrap_ok(self._home(), str(body_j.get("bootstrap") or "")):
+            if not _noauth and not bootstrap_ok(self._home(), str(body_j.get("bootstrap") or "")):
                 self._send(403, {"success": False,
                                  "error": "bootstrap code required",
                                  "bootstrap_required": True})
@@ -1461,7 +1587,10 @@ class Handler(BaseHTTPRequestHandler):
                                  "error": f"password must be >= {PW_MIN_LEN} chars"})
                 return
             try:
-                set_password_once(self._home(), password)
+                if _noauth:
+                    force_set_password(self._home(), password)
+                else:
+                    set_password_once(self._home(), password)
             except FileExistsError:
                 self._send(403, {"success": False, "error": "password already set"})
                 return

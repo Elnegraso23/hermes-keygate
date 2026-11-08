@@ -4,6 +4,19 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.5 — 2026-11-07
+- **La web también deja elegir las contraseñas** (no sólo la terminal). Tarjeta
+  "Configurar contraseñas" con dos acciones:
+  - *Definir web*: fija la contraseña de acceso (12+). Funciona incluso en modo
+    sin contraseña, sin código de arranque ni clave previa.
+  - *Definir base*: recrea una base **vacía** con keyfile + contraseña maestra
+    (8+). Con entradas dentro se rechaza y remite a KeePassXC, porque
+    `keepassxc-cli` no puede re-cifrar una base con datos.
+  La contraseña de la base viaja por stdin al `db-create`, nunca por argv; el
+  `.kdbx` se escribe en un temporal y se reemplaza atómicamente.
+- Nuevo endpoint `POST /api/set-db-password`; `POST /api/set-password` acepta
+  sobrescribir cuando el modo sin contraseña está activo.
+
 ## 0.7.4 — 2026-11-07
 - **`scripts/keygate-configure`**: elegir las contraseñas después de instalar.
   Pregunta (1) si quieres contraseña para la web y la página de alias, y (2) si
