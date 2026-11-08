@@ -55,6 +55,7 @@ while IFS= read -r f; do UNITBAK+=("$f"); done < <(ls -1 "$HOME_DIR/.config/syst
 echo "-- estado en ~/.hermes"
 STATE_FILES=(keygate-audit.jsonl keygate-autofill.json keygate-index.json keygate-sync-pass
              keygate-sync-bootstrap keygate-sync-noauth keygate-sync.pid keygate-version-check.json
+             keygate-wizard.json
              keygate-web.meta.json keygate-vault.enc keygate-vault.key keygate-vault.meta.json
              keygate-web-pass keygate-alias-page-pass)
 FOUND_STATE=()
