@@ -77,6 +77,46 @@ def db_entry_count(db: str, kf: str) -> int:
         return -1
 
 
+WIZARD_FILE = "keygate-wizard.json"
+
+
+def wizard_path(home: Path) -> Path:
+    return home / WIZARD_FILE
+
+
+def load_wizard(home: Path) -> dict:
+    try:
+        return json.loads(wizard_path(home).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_wizard(home: Path, data: dict) -> None:
+    fp = wizard_path(home)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = fp.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, fp)
+
+
+def wizard_state(home: Path, db: str, kf: str) -> dict:
+    """Qué paso toca: 'web' (contraseña de la web), 'db' (protección de la
+    base) o None si ya está configurado. Sin contraseña de web, el paso 1
+    siempre manda: no se puede configurar la base sin entrar."""
+    st = load_wizard(home)
+    # Paso 1 SIEMPRE primero: sin contraseña de web no se configura nada.
+    # (El modo sin contraseña sigue disponible como salida explícita, pero ya
+    # no salta el asistente.)
+    if not password_is_set(home):
+        return {"needs": "web", "db_choice": st.get("db"),
+                "can_skip_web": noauth_allowed(),
+                "db_entries": max(0, db_entry_count(db, kf))}
+    if not st.get("db"):
+        return {"needs": "db", "db_choice": None, "db_entries": max(0, db_entry_count(db, kf))}
+    return {"needs": None, "db_choice": st.get("db"), "db_entries": max(0, db_entry_count(db, kf))}
+
+
 def force_set_password(home: Path, password: str) -> bool:
     """Define (o reemplaza) la contraseña de la web y apaga el modo sin auth."""
     if not isinstance(password, str) or len(password) < PW_MIN_LEN:
@@ -461,6 +501,18 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 <pre class="hide" id="setupout"></pre>
 </div>
 
+<div class="card s3 hide" id="step2card">
+<h2 class="s4">Paso 2 — ¿proteges la base de datos?</h2>
+<div class="sub">Tu <code>hermes.kdbx</code> se abre con la keyfile (<code>.key</code>). Puedes exigir además una contraseña maestra: si alguien consigue la base y la keyfile juntas, sin esa contraseña no entra.</div>
+<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_key" checked> Solo keyfile (.key) — abre sin pedir nada</label></div>
+<div class="row"><label class="sub"><input type="radio" name="dbp" id="dbp_pass"> Keyfile + contraseña maestra — la pides al abrir</label></div>
+<div class="row">
+  <input class="s5" type="password" id="dbpw1" placeholder="Contraseña maestra (mín. 8)" autocomplete="new-password" disabled>
+  <button data-act="kg_wizard_db">Continuar</button>
+</div>
+<pre class="hide" id="step2out"></pre>
+</div>
+
 <div id="logincard" class="card s10 hide">
 <h2 class="s11">Acceso a keygate-sync</h2>
 <div class="sub">Ingresa la contraseña de la web. No se muestra nada sin ella.</div>
@@ -514,19 +566,7 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 <div class="card"><b>Protección de la base</b>
 <div class="sub" id="dbprot">Comprobando…</div></div>
 
-<div class="card" id="cfgcard"><b>Configurar contraseñas</b>
-<div class="sub">Elige aquí o en la terminal (<code>scripts/keygate-configure</code>). Nunca se guardan en claro: sólo su hash.</div>
-<div class="row">
-  <input class="s5" type="password" id="newpw" placeholder="Contraseña de la web (mín. 12)" autocomplete="new-password">
-  <button data-act="kg_set_web">Definir web</button>
-</div>
-<div class="row">
-  <input class="s5" type="password" id="dbpw" placeholder="Contraseña maestra de la base (mín. 8)" autocomplete="new-password">
-  <button data-act="kg_set_db">Definir base</button>
-</div>
-<div class="sub" id="dbcfgstate">—</div>
-<pre class="hide" id="cfgout"></pre>
-</div>
+
 <div class="card"><div class="sub s1">
 1. <a href="#bajar">⬇ Descarga el .kdbx actual</a> (vacío la primera vez).<br>
 2. <a href="#onb">Descarga el .key (una sola vez)</a> — guárdalo 600, no sale de tu PC.<br>
@@ -654,6 +694,13 @@ async function boot() {
     document.getElementById('setupout').textContent = 'Servidor no responde. ¿Está corriendo keygate-sync?';
     document.getElementById('setupcard').classList.remove('hide'); return; }
   window.__noauth = !!st.noauth_active;
+  let wz = {};
+  try { wz = await (await fetch('/api/wizard-state')).json(); } catch (e) { wz = {}; }
+  if (wz.needs === 'db') {
+    document.getElementById('setupcard').classList.add('hide');
+    document.getElementById('step2card').classList.remove('hide');
+    return;
+  }
   if (st.noauth_active) {
     showAuthedUI();
     // Sin contraseña no hay nada que cambiar ni sesión que cerrar.
@@ -749,6 +796,26 @@ async function kg_setup() {
   } catch (e) { out.textContent = 'Servidor no responde.'; return; }
   sessionStorage.setItem('kg_t', a);
   document.getElementById('pw1').value = document.getElementById('pw2').value = '';
+  const st = await (await fetch('/api/wizard-state')).json().catch(() => ({}));
+  if (st.needs === 'db') {
+    document.getElementById('setupcard').classList.add('hide');
+    document.getElementById('step2card').classList.remove('hide');
+    return;
+  }
+  showAuthedUI();
+  load();
+}
+async function kg_wizard_db() {
+  const out = document.getElementById('step2out'); out.classList.remove('hide');
+  const protect = document.getElementById('dbp_pass').checked;
+  const pw = document.getElementById('dbpw1').value;
+  if (protect && pw.length < 8) { out.textContent = 'La contraseña maestra necesita 8+ caracteres.'; return; }
+  const r = await fetch('/api/wizard/db', {method: 'POST',
+    headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+    body: JSON.stringify({protect: protect, password: pw})});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.success) { out.textContent = 'Error: ' + (j.error || r.status); return; }
+  document.getElementById('step2card').classList.add('hide');
   showAuthedUI();
   load();
 }
@@ -1313,6 +1380,12 @@ class Handler(BaseHTTPRequestHandler):
                              "db_entries": max(0, db_entry_count(db, kf)),
                              "bind_local": bind_is_loopback()})
             return
+        if url.path == "/api/wizard-state":
+            if not self._rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            self._send(200, {"success": True, **wizard_state(self._home(), db, kf)})
+            return
         if url.path == "/api/skip-auth":
             # Sin contraseña: sólo si escuchamos en localhost y nadie ha
             # reclamado todavía. Se deja constancia con un flag 0600.
@@ -1528,6 +1601,36 @@ class Handler(BaseHTTPRequestHandler):
             with os.fdopen(fd, "w") as f:
                 f.write(str(int(time.time())))
             self._send(200, {"success": True, "noauth": True})
+            return
+        if url.path == "/api/wizard/db":
+            if not self._rate_ok() or not self._auth_rate_ok():
+                self._send(429, {"success": False, "error": "rate limited"})
+                return
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
+            if length <= 0 or length > 1024:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            protect = bool(body.get("protect"))
+            if protect:
+                res = set_db_master_password(db, kf, str(body.get("password") or ""))
+                if not res.get("success"):
+                    self._send(409, res)
+                    return
+                choice = "password"
+            else:
+                choice = "keyfile"
+            st = load_wizard(self._home())
+            st.update({"db": choice, "at": int(time.time())})
+            save_wizard(self._home(), st)
+            kg.audit(self._home(), {"ev": "wizard_db", "choice": choice})
+            self._send(200, {"success": True, "db": choice})
             return
         if url.path == "/api/set-db-password":
             if not self._rate_ok() or not self._auth_rate_ok():
