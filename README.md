@@ -94,7 +94,11 @@ cd ~/Projects/github/hermes-keygate
 bash scripts/keygate-preflight.sh   # ¿esta máquina puede? (binarios, db-create, HOME, dir del vault)
 bash scripts/keygate-install.sh     # hace todo; el instalador también corre el preflight
 # Flags: --reset (reset total explícito: password web + flag one-shot + vault
-#          con respaldo) · KEYGATE_BIND=<IP> (default: auto-detecta Tailscale)
+#          con respaldo) · --no-web-auth (web y página de alias SIN contraseña,
+#          para pruebas o equipo propio) · --with-password / --keyfile-only
+#          (protección de la base sin preguntar) · KEYGATE_BIND=<IP>
+#          (default: auto-detecta Tailscale)
+# Desinstalar: bash scripts/keygate-uninstall.sh [--purge] [--dry-run]
 ```
 
 Lo que hace el instalador, paso por paso (a mano solo si insistes):
