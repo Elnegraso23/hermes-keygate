@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# keygate-configure — elige TÚ las contraseñas, después de instalar.
+#
+#   bash scripts/keygate-configure
+#
+# Pregunta, en este orden:
+#   1) ¿Quieres contraseña para entrar a la web keygate (y a la página de alias)?
+#      Si dices que sí, la tecleas dos veces (sin eco). Nunca se escribe a disco:
+#      sólo queda su hash PBKDF2.
+#   2) ¿Quieres contraseña maestra en la base (además de la .key)?
+#      Sólo se puede hacer aquí si la base está VACÍA: se recrea con contraseña.
+#      Si ya tiene entradas, el camino es KeePassXC (Database Settings > Security).
+#
+# Este script es interactivo a propósito: sin terminal (TTY) no hace nada, porque
+# las contraseñas se leen del teclado y jamás de un argumento.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DEST="${KEYGATE_DEST:-$HOME/.hermes/plugins/keygate}"
+DB="${KEYGATE_DB:-$HOME/Documentos/hermes.kdbx}"
+KF="${KEYGATE_KEYFILE:-$HOME/.keepass-agent.key}"
+PY="${PYTHON:-python3}"
+
+say() { printf '  %s\n' "$*"; }
+need_tty() {
+  if [ ! -t 0 ]; then
+    echo "Este asistente necesita una terminal real (TTY) para leer contraseñas." >&2
+    echo "Ejecútalo tú en tu consola:  bash $(basename "$0")" >&2
+    exit 2
+  fi
+}
+
+[ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ] && {
+  sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0; }
+
+need_tty
+
+[ -d "$PLUGIN_DEST" ] || { echo "keygate no está instalado en $PLUGIN_DEST" >&2; exit 1; }
+
+echo "== keygate-configure =="
+
+# ---------- 1) contraseña de la web ----------
+echo
+read -r -p "¿Poner contraseña para entrar a la web y a la página de alias? [s/N] " resp
+case "${resp:-n}" in
+  s|S|si|SI|y|Y)
+    DEST_SYNC="$PLUGIN_DEST/sync" HH="$HOME/.hermes" "$PY" - <<'PYEOF'
+import getpass, os, pathlib, sys
+sys.path.insert(0, os.environ["DEST_SYNC"])
+import keygate_sync as ks
+home = pathlib.Path(os.environ["HH"])
+pw = getpass.getpass("  contraseña de la web (mínimo 12): ")
+if pw != getpass.getpass("  repítela: "):
+    print("  (!) no coinciden; no se cambió nada"); raise SystemExit(0)
+if len(pw) < 12:
+    print("  (!) menos de 12 caracteres; no se cambió nada"); raise SystemExit(0)
+# borra el modo sin contraseña y define la clave
+try:
+    ks.noauth_flag(home).unlink()
+except Exception:
+    pass
+try:
+    ks.passfile(home).unlink()
+except Exception:
+    pass
+ok = ks.set_password_once(home, pw)
+print("  web: " + ("contraseña definida" if ok else "no se pudo definir"))
+PYEOF
+    # misma clave para la página de alias (otro servicio, otro hash)
+    HERMES_HOME="$HOME/.hermes" KEYGATE_ALIAS_NOAUTH=0 "$PY" - "$PLUGIN_DEST" <<'PYEOF2'
+import getpass, os, sys
+sys.path.insert(0, os.environ.get("PLUGIN_DEST", sys.argv[1]))
+import keygate_web as kw
+pw = getpass.getpass("  contraseña de la página de alias (mínimo 10): ")
+if pw != getpass.getpass("  repítela: "):
+    print("  (!) no coinciden; página de alias sin cambios"); raise SystemExit(0)
+if len(pw) < 10:
+    print("  (!) menos de 10 caracteres; página de alias sin cambios"); raise SystemExit(0)
+kw.set_password(pw)
+print("  página de alias: contraseña definida")
+PYEOF2
+    ;;
+  *) say "web: queda SIN contraseña" ;;
+esac
+
+# ---------- 2) contraseña de la base ----------
+echo
+if [ ! -f "$DB" ]; then
+  say "no existe $DB — corre primero scripts/keygate-setup"
+else
+  if timeout 10 keepassxc-cli ls -k "$KF" --no-password -q "$DB" >/dev/null 2>&1; then
+    say "base actual: SOLO keyfile (.key)"
+    ENTRIES="$(timeout 10 keepassxc-cli ls -R -k "$KF" --no-password -q "$DB" 2>/dev/null | grep -c . || true)"
+    if [ "${ENTRIES:-0}" -gt 0 ]; then
+      say "tiene $ENTRIES entradas: para añadir contraseña maestra usa KeePassXC"
+      say "  Database > Database Settings > Security > Add password"
+    else
+      read -r -p "¿Recrear la base vacía CON contraseña maestra? [s/N] " r2
+      case "${r2:-n}" in
+        s|S|si|SI|y|Y)
+          say "se te pedirá la contraseña dos veces (keepassxc-cli db-create -p)"
+          rm -f "$DB"
+          if keepassxc-cli db-create --set-key-file "$KF" -p "$DB"; then
+            chmod 600 "$DB"
+            say "base recreada con contraseña maestra"
+            say "para fills no interactivos: exportá KEYGATE_DB_PASSWORD en el entorno de Hermes"
+          else
+            say "(!) falló la creación; vuelve a correr scripts/keygate-setup para tener base"
+          fi
+          ;;
+        *) say "base: se queda solo keyfile" ;;
+      esac
+    fi
+  else
+    say "base actual: keyfile + CONTRASEÑA maestra"
+    say "fills no interactivos: exportá KEYGATE_DB_PASSWORD (o keygate-unlock)"
+  fi
+fi
+
+echo
+echo "== listo =="
+echo "reinicia los servicios para aplicar: systemctl --user restart keygate-sync keygate-alias-page"

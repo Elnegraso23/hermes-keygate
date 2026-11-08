@@ -4,6 +4,15 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## 0.7.4 — 2026-11-07
+- **`scripts/keygate-configure`**: elegir las contraseñas después de instalar.
+  Pregunta (1) si quieres contraseña para la web y la página de alias, y (2) si
+  quieres contraseña maestra en la base cuando está vacía (la recrea con
+  `db-create -p`). Todo por TTY con `getpass`: sin terminal no hace nada, y la
+  contraseña nunca se escribe a disco ni se pasa por argumento.
+  Motivo: al instalar sin terminal (CI, agente, `< /dev/null`) los prompts no
+  aparecen y el usuario nunca elige nada; el instalador cae a los defaults.
+
 ## 0.7.3 — 2026-11-07
 - **`scripts/keygate-uninstall.sh`**: desinstalador completo, espejo del
   instalador. Inventaría antes de borrar y distingue estado de datos:
