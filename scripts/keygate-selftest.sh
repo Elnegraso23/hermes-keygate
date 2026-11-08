@@ -145,7 +145,7 @@ head -c 128 /dev/urandom > "$SKF" && chmod 600 "$SKF"
 keepassxc-cli db-create --set-key-file "$SKF" -q "$SDB" >/dev/null 2>&1
 printf 'x\n' | keepassxc-cli add -k "$SKF" --no-password -q "$SDB" t-alias -u u --url https://example.com/login -p >/dev/null 2>&1
 SPORT=8479
-HOME="$SHOME" KEYGATE_DB="$SDB" KEYGATE_KEYFILE="$SKF" KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=$SPORT \
+HOME="$SHOME" HERMES_HOME="$SHOME/.hermes" KEYGATE_DB="$SDB" KEYGATE_KEYFILE="$SKF" KEYGATE_BIND=127.0.0.1 KEYGATE_PORT=$SPORT \
   setsid python3 "$REPO/sync/keygate_sync.py" >/tmp/kg-selftest-srv.log 2>&1 < /dev/null &
 SRV=$!
 sleep 2
@@ -204,19 +204,18 @@ no_origin=$(command curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api
   -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
 [ "$no_origin" = "403" ] && ok "F5: POST sin Origin ni Sec-Fetch-Site -> 403" \
   || bad "F5 sin Origin" "esperaba 403, obtuvo $no_origin"
-# F5: con Origin correcto pero sin código de arranque -> 403
-no_boot=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/set-password" \
-  -H 'Content-Type: application/json' -d "{\"password\":\"$PW1\"}")
-[ "$no_boot" = "403" ] && ok "F5: sin código de arranque -> 403" \
-  || bad "F5 sin bootstrap" "esperaba 403, obtuvo $no_boot"
-BOOT=$(cat "$SHOME/.hermes/keygate-sync-bootstrap" 2>/dev/null || true)
-[ -n "$BOOT" ] && ok "F5: código de arranque generado (0600)" \
-  || bad "bootstrap" "no apareció $SHOME/.hermes/keygate-sync-bootstrap"
+# Decisión del dueño: sin código de arranque. Lo que sigue cerrando el
+# endpoint es CSRF (mismo origen) y que muera en cuanto hay contraseña.
 r=$(curl -s -m 15 -X POST "$B/api/set-password" -H 'Content-Type: application/json' \
-  -d "{\"password\":\"$PW1\",\"bootstrap\":\"$BOOT\"}")
-echo "$r" | grep -q '"success": true' && ok "set-password inicial (con código de arranque)" || bad "set-password" "$r"
-[ ! -f "$SHOME/.hermes/keygate-sync-bootstrap" ] && ok "F5: código consumido y borrado" \
-  || bad "bootstrap consumo" "el fichero sigue existiendo"
+  -H "Origin: $B" -d "{\"password\":\"$PW1\"}")
+echo "$r" | grep -q '"success": true' && ok "set-password inicial (sin código)" || bad "set-password inicial" "$r"
+second=$(curl -s -m 10 -X POST "$B/api/set-password" -H 'Content-Type: application/json' \
+  -H "Origin: $B" -d "{\"password\":\"$PW2\"}")
+echo "$second" | grep -q 'already set' && ok "endpoint cerrado tras definir la contraseña" \
+  || bad "set-password repetido" "$second"
+# El código de arranque ya no se genera (se eliminó el mecanismo).
+[ ! -f "$SHOME/.hermes/keygate-sync-bootstrap" ] && ok "sin código de arranque (mecanismo eliminado)" \
+  || bad "bootstrap" "seguía generándose el código"
 code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -X POST "$B/api/reset-password" \
   -H 'Content-Type: application/json' -d "{\"current\":\"mal\",\"new\":\"$PW2\"}")
 [ "$code" = "401" ] && ok "reset sin Bearer -> 401" || bad "reset sin auth" "code=$code"
