@@ -168,60 +168,350 @@ def url_for(alias: str = "") -> str:
 
 # ------------------------------------------------------------------ server ---
 
-PAGE = """<!doctype html><html lang="es"><head><meta charset="utf-8">
+PAGE = """<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>keygate — alias</title>
 <style>
- body{{font:15px/1.5 system-ui,sans-serif;margin:0;background:#11141a;color:#e6e9ef}}
- header{{padding:18px 22px;background:#1a1f29;border-bottom:1px solid #2c3442}}
- h1{{margin:0;font-size:19px}} .sub{{color:#8b94a7;font-size:13px;margin-top:4px}}
- main{{padding:22px;max-width:900px}}
- table{{width:100%;border-collapse:collapse;margin-top:14px}}
- th,td{{text-align:left;padding:10px 8px;border-bottom:1px solid #242b37;font-size:14px}}
- th{{color:#8b94a7;font-weight:600;font-size:12px;text-transform:uppercase}}
- code{{background:#1e2432;padding:2px 6px;border-radius:4px;font-size:13px}}
- .on{{color:#5ddc9a}} .off{{color:#e8837a}}
- button{{background:#2f3a4d;color:#e6e9ef;border:1px solid #3b485f;border-radius:6px;
-  padding:6px 12px;cursor:pointer;font-size:13px}}
- button:hover{{background:#3a4761}}
- .card{{background:#1a1f29;border:1px solid #2c3442;border-radius:10px;padding:16px;margin-top:18px}}
- .msg{{background:#1f3b2c;border:1px solid #2f6b4b;padding:10px 14px;border-radius:8px;margin-top:14px}}
-</style></head><body>
-<header><h1>keygate</h1>
-<div class="sub">Alias y auto-fill. Esta página no muestra contraseñas: sólo políticas.</div></header>
-<main>{msg}
-<table><tr><th>Alias</th><th>Origen</th><th>Auto-fill</th><th></th></tr>{rows}</table>
-<div class="card"><strong>Eventos recientes</strong>
-<pre style="white-space:pre-wrap;font-size:12px;color:#9aa4b8">{audit}</pre></div>
-</main></body></html>"""
+:root{
+  color-scheme: light dark;
+  --bg:        light-dark(oklch(98.4% 0.003 250), oklch(19%   0.015 255));
+  --surface:   light-dark(oklch(100%  0     0  ), oklch(23%   0.017 255));
+  --surface-2: light-dark(oklch(96.5% 0.004 250), oklch(26.5% 0.019 255));
+  --line:      light-dark(oklch(88%   0.007 250), oklch(33%   0.020 255));
+  --text:      light-dark(oklch(21%   0.010 255), oklch(95%   0.008 255));
+  --muted:     light-dark(oklch(44%   0.015 255), oklch(74%   0.015 255));
+  --accent:    light-dark(oklch(50%   0.150 255), oklch(80%   0.120 220));
+  --ok:        light-dark(oklch(42%   0.120 155), oklch(84%   0.130 155));
+  --ok-bg:     light-dark(oklch(94%   0.040 155), oklch(30%   0.045 155));
+  --warn:      light-dark(oklch(45%   0.110 70 ), oklch(86%   0.110 85 ));
+  --warn-bg:   light-dark(oklch(95%   0.035 85 ), oklch(31%   0.040 85 ));
+  --off:       light-dark(oklch(45%   0.160 25 ), oklch(80%   0.110 30 ));
+  --off-bg:    light-dark(oklch(95%   0.030 25 ), oklch(31%   0.045 30 ));
+  --focus:     light-dark(oklch(52%   0.180 255), oklch(86%   0.140 220));
+  --radius: 10px;
+  --wrap: 62rem;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  scrollbar-color: light-dark(oklch(70% 0.01 255), oklch(45% 0.015 255))
+                  light-dark(oklch(94% 0.004 250), oklch(24% 0.015 255));
+  scrollbar-width: thin;
+  accent-color: var(--accent);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+*, *::before, *::after{ box-sizing: border-box; }
+::selection{ background: var(--accent); color: var(--bg); }
+:focus-visible{ outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+body{ margin: 0; }
+.wrap{
+  inline-size: 100%; max-inline-size: var(--wrap);
+  margin-inline: auto; padding-inline: clamp(1rem, 3vw, 1.75rem);
+}
+.bar{
+  position: sticky; inset-block-start: 0; z-index: 10;
+  background: var(--surface); border-block-end: 1px solid var(--line);
+}
+.bar .wrap{
+  display: flex; flex-wrap: wrap; gap: .75rem 1rem;
+  align-items: center; justify-content: space-between;
+  padding-block: 1rem;
+}
+.bar h1{ margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; text-wrap: balance; }
+.sub{ margin: .2rem 0 0; color: var(--muted); font-size: .82rem; max-inline-size: 46ch; text-wrap: pretty; }
+main{ padding-block: clamp(1rem, 3vw, 1.75rem) 3rem; }
+main .wrap{ display: grid; gap: 1.75rem; }
+h2{
+  margin: 0 0 .6rem; font-size: .72rem; font-weight: 650; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--muted);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+}
+h2 .count{ font-weight: 500; letter-spacing: 0; text-transform: none; font-size: .76rem; }
+.flash{
+  display: flex; align-items: flex-start; gap: .6rem;
+  padding: .7rem .9rem;
+  background: var(--surface); border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: var(--radius); font-size: .88rem;
+  opacity: 1; transform: translateY(0);
+  transition: opacity .28s ease, transform .28s cubic-bezier(.2,.7,.3,1);
+}
+.flash--err{ border-inline-start-color: var(--off); }
+.flash strong{ font-weight: 650; }
+@starting-style{ .flash{ opacity: 0; transform: translateY(-6px); } }
+.table-wrap{
+  container-type: inline-size; overflow: auto;
+  max-block-size: min(30rem, 70vh);
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+table{ inline-size: 100%; border-collapse: separate; border-spacing: 0; font-size: .9rem; }
+caption.vh{
+  position: absolute; inline-size: 1px; block-size: 1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+thead th{
+  position: sticky; inset-block-start: 0; z-index: 2;
+  background: var(--surface-2); text-align: start;
+  padding: .55rem .9rem;
+  font-size: .68rem; font-weight: 650; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+  border-block-end: 1px solid var(--line); white-space: nowrap;
+}
+thead th:last-child, tbody td:last-child{ text-align: end; }
+thead th.col-status, tbody td.col-status{ text-align: start; }
+tbody th, tbody td{
+  padding: .55rem .9rem; text-align: start; font-weight: 400;
+  border-block-end: 1px solid color-mix(in oklch, var(--line) 55%, transparent);
+  vertical-align: middle;
+}
+tbody tr:last-child th, tbody tr:last-child td{ border-block-end: 0; }
+tbody th{
+  font-weight: 600; position: sticky; inset-inline-start: 0;
+  background: var(--surface); white-space: nowrap;
+  font-family: var(--mono); font-size: .84rem;
+}
+tbody tr:hover th, tbody tr:hover td{ background: var(--surface-2); }
+tbody tr[data-changed] th{ box-shadow: inset 3px 0 0 var(--accent); color: var(--accent); }
+.origin{ color: var(--muted); font-family: var(--mono); font-size: .82rem; }
+.pill{
+  display: inline-flex; align-items: center; gap: .38rem;
+  inline-size: fit-content;
+  padding: .14rem .5rem .14rem .42rem;
+  border-radius: 999px; font-size: .77rem; font-weight: 550; white-space: nowrap;
+}
+.pill::before{
+  content: ""; inline-size: .4rem; block-size: .4rem;
+  border-radius: 50%; background: currentColor; flex: none;
+}
+.pill--on{ background: var(--ok-bg); color: var(--ok); }
+.pill--warn{ background: var(--warn-bg); color: var(--warn); }
+.pill--off{ background: var(--off-bg); color: var(--off); }
+.empty{ color: var(--muted); font-size: .88rem; }
+.btn{
+  font: inherit; font-size: .8rem; font-weight: 500;
+  min-block-size: 1.9rem; padding: .25rem .7rem;
+  color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 8px;
+  cursor: pointer; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, transform .08s ease;
+}
+.btn:hover{ border-color: var(--accent); background: color-mix(in oklch, var(--surface-2) 72%, var(--text) 8%); }
+.btn:active{ transform: translateY(1px); }
+form.inline{ margin: 0; display: inline; }
+.log{
+  container-type: inline-size;
+  margin: 0; padding: .3rem; list-style: none;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); max-block-size: 16rem; overflow: auto;
+  font-size: .83rem;
+}
+.log li{
+  display: grid; grid-template-columns: 4.4rem 5.6rem 1fr auto;
+  gap: .7rem; align-items: center;
+  padding: .42rem .55rem; border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.log li + li{ border-block-start: 1px solid color-mix(in oklch, var(--line) 50%, transparent); }
+.log time{ color: var(--muted); }
+.log .ev{ font-family: var(--mono); font-size: .78rem; }
+.log .al{ color: var(--muted); font-family: var(--mono); font-size: .78rem; overflow-wrap: anywhere; }
+@container (width < 34rem){
+  table, thead, tbody, tr, th, td{ display: block; }
+  thead{ display: none; }
+  tbody tr{
+    margin: 0 0 .75rem; padding: .6rem .75rem .75rem;
+    border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  tbody tr:last-child{ margin-block-end: 0; }
+  tbody th{ position: static; background: transparent; font-size: .95rem; padding: 0 0 .45rem; }
+  tbody tr[data-changed] th{ box-shadow: none; }
+  tbody tr[data-changed]{ box-shadow: inset 3px 0 0 var(--accent); }
+  tbody td{
+    border: 0; padding: .18rem 0; text-align: start;
+    display: grid; grid-template-columns: 6rem 1fr; gap: .5rem; align-items: center;
+  }
+  tbody td::before{
+    content: attr(data-label); color: var(--muted);
+    font-size: .68rem; font-weight: 650; letter-spacing: .06em; text-transform: uppercase;
+  }
+  tbody td:last-child{ padding-block-start: .55rem; }
+  tbody td:last-child::before{ content: none; }
+  tbody td:last-child .btn{ inline-size: 100%; }
+  .table-wrap{ background: transparent; border: 0; }
+}
+@container (width < 30rem){
+  .log li{
+    grid-template-columns: 3.6rem 1fr auto;
+    grid-template-areas: "time ev dec" "alias alias alias";
+    row-gap: .3rem;
+  }
+  .log time{ grid-area: time; }
+  .log .ev{ grid-area: ev; }
+  .log .de{ grid-area: dec; justify-self: end; }
+  .log .al{ grid-area: alias; padding-inline-start: 3.6rem; }
+}
+@media (prefers-reduced-motion: reduce){
+  *{ transition: none !important; animation: none !important; }
+}
+@media (forced-colors: active){
+  .pill, .btn, .flash, .table-wrap, .log{ border: 1px solid CanvasText; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <div>
+      <h1>keygate</h1>
+      <p class="sub">Alias y auto-fill. Esta página no muestra contraseñas: solo políticas.</p>
+    </div>
+    <span class="pill pill--on">@@COUNT@@</span>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    @@MSG@@
+    <section aria-labelledby="alias-h">
+      <h2 id="alias-h">Estado por alias <span class="count">@@ALIASCOUNT@@</span></h2>
+      <div class="table-wrap" tabindex="0" role="region" aria-labelledby="alias-h">
+        <table>
+          <caption class="vh">Alias registrados: origen, estado del auto-fill y acciones</caption>
+          <thead>
+            <tr>
+              <th scope="col">Alias</th>
+              <th scope="col">Origen</th>
+              <th scope="col" class="col-status">Auto-fill</th>
+              <th scope="col"><span class="vh">Acciones</span></th>
+            </tr>
+          </thead>
+          <tbody>
+@@ROWS@@
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="log-h">
+      <h2 id="log-h">Eventos recientes <span class="count">@@EVCOUNT@@</span></h2>
+      <ol class="log" tabindex="0" role="region" aria-label="Bitácora de auto-fill">
+@@EVENTS@@
+      </ol>
+    </section>
+  </div>
+</main>
+
+</body>
+</html>"""
+
+_DECISIONS = {
+    "allow": ("pill--on", "permitido"),
+    "intent": ("pill--warn", "sin relleno"),
+    "deny": ("pill--off", "bloqueado"),
+    "blocked": ("pill--off", "bloqueado"),
+    "error": ("pill--off", "error"),
+}
 
 
-def _render(msg: str = "") -> bytes:
-    rows = []
-    for r in alias_rows():
-        state = '<span class="on">activo</span>' if r["enabled"] else '<span class="off">inactivo</span>'
-        action = "disable" if r["enabled"] else "enable"
-        rows.append(
-            f'<tr><td><code>{html.escape(r["alias"])}</code></td>'
-            f'<td>{html.escape(r["origin"])}</td><td>{state}</td>'
-            f'<td><form method="post" action="/toggle" style="margin:0">'
-            f'<input type="hidden" name="alias" value="{html.escape(r["alias"])}">'
-            f'<input type="hidden" name="action" value="{action}">'
-            f'<button type="submit">{action}</button></form></td></tr>')
-    if not rows:
-        rows.append('<tr><td colspan="4" style="color:#8b94a7">Sin alias todavía: '
-                    'pídele a Hermes keygate_import con el alias de KeePass.</td></tr>')
-    events = []
+def _pretty_origin(origin: str) -> str:
+    """Host + ruta, sin esquema: 'https://mail.x.com/' -> 'mail.x.com'."""
+    s = (origin or "").strip()
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    return s.rstrip("/")
+
+
+def _count_label(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _events(limit: int = 8) -> list:
     audit_fp = home() / "keygate-audit.jsonl"
+    out = []
     if audit_fp.exists():
-        for ln in audit_fp.read_text(encoding="utf-8", errors="replace").splitlines()[-12:]:
+        for ln in audit_fp.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
             try:
-                events.append(json.loads(ln))
+                ev = json.loads(ln)
             except Exception:
                 continue
-    body = "\n".join(json.dumps(e, ensure_ascii=False) for e in reversed(events))
-    return PAGE.format(msg=msg, rows="".join(rows),
-                       audit=html.escape(body or "—")).encode()
+            if isinstance(ev, dict):
+                out.append(ev)
+    out.reverse()  # el más reciente primero
+    return out
+
+
+def _event_items(events: list) -> str:
+    items = []
+    for ev in events:
+        ts = ev.get("ts")
+        try:
+            stamp = time.strftime("%H:%M", time.localtime(float(ts)))
+            iso = time.strftime("%Y-%m-%dT%H:%M", time.localtime(float(ts)))
+        except Exception:
+            stamp, iso = "--:--", ""
+        cls, label = _DECISIONS.get(str(ev.get("decision") or "").lower(), ("pill--warn", "registrado"))
+        target = _pretty_origin(ev.get("origin") or "") or ev.get("alias") or "—"
+        items.append(
+            '<li>'
+            f'<time datetime="{html.escape(iso)}">{html.escape(stamp)}</time>'
+            f'<span class="ev">{html.escape(str(ev.get("ev") or "?"))}</span>'
+            f'<span class="al">{html.escape(str(target))}</span>'
+            f'<span class="pill de {cls}">{html.escape(label)}</span>'
+            "</li>")
+    if not items:
+        items.append('<li><span class="al">Sin eventos registrados todavía.</span></li>')
+    return "\n".join(items)
+
+
+def _render(msg: str = "", kind: str = "ok", changed: str = "") -> bytes:
+    data = alias_rows()
+    rows = []
+    for r in data:
+        alias = html.escape(r["alias"])
+        origin = html.escape(_pretty_origin(r["origin"])) or "—"
+        if r["enabled"]:
+            pill = '<span class="pill pill--on">activo</span>'
+            action, label = "disable", "Desactivar"
+        else:
+            pill = '<span class="pill pill--warn">pausado</span>'
+            action, label = "enable", "Activar"
+        flag = ' data-changed' if r["alias"] == changed else ""
+        rows.append(
+            f'<tr{flag}>'
+            f'<th scope="row">{alias}</th>'
+            f'<td data-label="Origen" class="origin">{origin}</td>'
+            f'<td data-label="Auto-fill" class="col-status">{pill}</td>'
+            f'<td><form class="inline" method="post" action="/toggle">'
+            f'<input type="hidden" name="alias" value="{alias}">'
+            f'<input type="hidden" name="action" value="{action}">'
+            f'<button class="btn" type="submit">{label}</button>'
+            "</form></td></tr>")
+    if not rows:
+        rows.append('<tr><td colspan="4" class="empty">Sin alias todavía: pídele a Hermes '
+                    'keygate_import con el alias de KeePass.</td></tr>')
+
+    events = _events()
+    flash = ""
+    if msg:
+        cls = "flash flash--err" if kind == "err" else "flash"
+        flash = f'<p class="{cls}" role="status">{msg}</p>'
+
+    page = (PAGE
+            .replace("@@COUNT@@", html.escape(_count_label(len(data), "alias", "alias")))
+            .replace("@@ALIASCOUNT@@", html.escape(_count_label(len(data), "registrado", "registrados")))
+            .replace("@@EVCOUNT@@", html.escape(_count_label(len(events), "último", "últimos")))
+            .replace("@@MSG@@", flash)
+            .replace("@@ROWS@@", "\n".join(rows))
+            .replace("@@EVENTS@@", _event_items(events)))
+    return page.encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -272,11 +562,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._deny()
         if path == "/":
             q = parse_qs(urlparse(self.path).query)
-            msg = ""
+            msg, changed = "", ""
             if q.get("alias"):
-                msg = (f'<div class="msg">Alias <code>{html.escape(q["alias"][0])}</code> '
-                       f'listo: activa auto-fill para no pedir aprobación.</div>')
-            return self._send(_render(msg))
+                alias = q["alias"][0]
+                msg = (f"Alias <strong>{html.escape(alias)}</strong> listo: "
+                       "activa el auto-fill para no pedir aprobación cada vez.")
+                changed = alias
+            return self._send(_render(msg, changed=changed))
         if path == "/audit":
             fp = home() / "keygate-audit.jsonl"
             body = fp.read_text(encoding="utf-8", errors="replace") if fp.exists() else ""
@@ -293,10 +585,13 @@ class Handler(BaseHTTPRequestHandler):
         alias = (form.get("alias") or [""])[0]
         action = (form.get("action") or [""])[0]
         ok = apply_toggle(alias, action == "enable")
-        msg = (f'<div class="msg">{html.escape(alias)} → '
-               f'{"auto-fill activo" if action == "enable" else "auto-fill apagado"}</div>'
-               if ok else '<div class="msg">no se pudo cambiar el alias</div>')
-        return self._send(_render(msg))
+        if ok:
+            msg = (f'Alias <strong>{html.escape(alias)}</strong> → '
+                   f'{"auto-fill activo" if action == "enable" else "auto-fill apagado"}.')
+        else:
+            msg = "No se pudo cambiar el alias."
+        return self._send(_render(msg, kind="ok" if ok else "err",
+                                  changed=alias if ok else ""))
 
 
 def serve(bind: str = "127.0.0.1", port: int = DEFAULT_PORT) -> None:

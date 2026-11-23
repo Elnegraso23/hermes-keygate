@@ -4,6 +4,23 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
+## Sin publicar — rediseño de la página de alias
+- **`keygate_web.py` (:8790)**: rediseño visual completo. No cambia auth, toggle
+  ni el modelo de datos; la página sigue sin ejecutar JavaScript.
+  - Modo claro/oscuro real con `color-scheme` + tokens `oklch` y `light-dark()`
+    (antes solo oscuro, con controles nativos claros).
+  - Tabla responsive por **container queries**: bajo 34rem se apila en tarjetas
+    con etiquetas inyectadas vía `data-label`.
+  - Estado con **color + forma + texto** (`activo` / `pausado`); `pausado` pasa a
+    ámbar, porque rojo comunicaba error.
+  - Accesibilidad: `:focus-visible`, `role="region"` + `tabindex` en tabla y
+    bitácora, cabeceras sticky, contraste mínimo verificado 6.5:1.
+  - La bitácora deja de ser JSON crudo en `<pre>`: hora, evento, destino y
+    veredicto como píldoras.
+  - La plantilla pasa de `.format()` a placeholders `@@...@@` con
+    `str.replace()`, así el CSS ya no necesita llaves dobles.
+  - Los mensajes de `?alias=` y del toggle resaltan la fila afectada.
+
 ## 0.7.6 — 2026-11-07
 - **Asistente de dos pasos, sin código de arranque.** Al entrar por primera vez:
   1) contraseña de la web (mín. 12, dos veces); 2) protección de la base, con
