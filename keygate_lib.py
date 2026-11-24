@@ -1401,3 +1401,32 @@ def add_entry(
     finally:
         zeroize(pw_buf)
         password = None
+
+
+def augment_signup_password_fills(classified, fills: List[dict], password: str) -> List[dict]:
+    """Support blind sign-up forms with Password + Confirm Password inputs.
+
+    `select_password_fill` fills only the primary password control. When a
+    registration page exposes a second password control (e.g. confirm-password
+    or second `new-password`), append at most ONE extra fill so Hermes can
+    complete blind sign-ups without ever seeing the password.
+    """
+    if not password or not fills or not classified:
+        return list(fills or [])
+    pw_tokens = {"password", "new_password", "confirm_password", "password_confirm"}
+    used_idx = {int(f.get("index")) for f in fills if isinstance(f, dict) and f.get("index") is not None}
+    pw_already = sum(1 for f in fills if isinstance(f, dict) and str(f.get("token") or "") in pw_tokens)
+    if pw_already != 1:
+        return list(fills)
+    extras = []
+    for c in classified:
+        tok = str(getattr(c, "token", "") or "")
+        ctrl = getattr(c, "control", None)
+        idx = getattr(ctrl, "index", None)
+        if tok in pw_tokens and idx is not None and int(idx) not in used_idx:
+            extras.append((int(idx), tok))
+    if not extras:
+        return list(fills)
+    extras.sort(key=lambda x: x[0])
+    idx, tok = extras[0]
+    return list(fills) + [{"index": idx, "token": tok, "value": password}]

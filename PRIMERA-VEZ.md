@@ -37,9 +37,12 @@ Hermes verifica (`keygate_status` debe decir `{locked:false, entries:0}`).
 
 ### 2. Crear tu primera cuenta en la pagina local (2 minutos)
 
-Hermes NO puede crear credenciales (bloqueado por politica — es tu seguridad).
-El camino es la pagina **http://127.0.0.1:8472** (Hermes la arranca por ti
-durante la instalacion; si no esta viva, pidela: "levanta la pagina de keygate"):
+Hermes nunca recibe ni ve tus contraseñas por chat (por seguridad). Para cuentas
+ya existentes el camino es la pagina **http://127.0.0.1:8472** (donde también
+podés habilitar `keygate_credential_add` para que Hermes cree cuentas nuevas con
+contraseña generada server-side y definir un correo por defecto). Hermes arranca
+la página por ti durante la instalacion; si no esta viva, pidela ("levanta la
+pagina de keygate"):
 
 1. Abre http://127.0.0.1:8472. La PRIMERA vez te obliga a crear una
    contraseña (minimo 12 caracteres, una sola vez — despues ese paso muere

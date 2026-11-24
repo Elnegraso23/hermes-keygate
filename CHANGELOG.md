@@ -23,6 +23,12 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
       generado o contraseña existente (fuera del chat) + revelación one-shot
       (`POST /api/entry/reveal`, TTL 120 s, `Cache-Control: no-store`, auditada).
     - `POST /api/upload` serializado con el mismo `flock` del DB.
+  - **Registro ciego (sign-up)**: `_native_keygate_fill` rellena hasta 2 campos
+    de contraseña (contraseña + confirmar contraseña) cuando la página es un
+    formulario de alta.
+  - **Fix `_CheckedPage`** en `_fill_bind_page`, **`AGENTS.md`**, badges/docs
+    sincronizados a `v0.8.0` y tests de integración completos con
+    `keepassxc-cli` en GitHub CI (`selftest`).
 - **`keygate_web.py` (:8790)**: rediseño visual completo. No cambia auth, toggle
   ni el modelo de datos; la página sigue sin ejecutar JavaScript.
   - Modo claro/oscuro real con `color-scheme` + tokens `oklch` y `light-dark()`

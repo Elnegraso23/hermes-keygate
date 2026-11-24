@@ -1,13 +1,13 @@
 # 🔑 hermes-keygate — logins ciegos de KeePassXC para Hermes Agent
 **Español** · [English](README.en.md)
 
-[![Version](https://img.shields.io/badge/version-0.6.16-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.0-orange.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Platform: Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)](README.md)
 [![Python: stdlib](https://img.shields.io/badge/python-stdlib%20only-blue.svg)](sync/keygate_sync.py)
-[![Tests: selftest 22/22](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
+[![Tests: selftest 44/44](https://img.shields.io/badge/selftest-44%2F44-success.svg)](scripts/keygate-selftest.sh)
 
-> **⚠️ ALFA (v0.6.16) — software fresco, con fallas conocidas.**
+> **⚠️ ALFA (v0.8.0) — software fresco, con fallas conocidas.**
 > Funciona en máquinas reales pero cambia rápido y a veces se rompe
 > (skills que no cargaban, rutas con comillas, botones mudos — todo real,
 > todo corregido en público). **No lo uses todavía para cuentas críticas**:
@@ -67,7 +67,7 @@ hermes.kdbx (keyfile,             pide "alias +               resuelve user/pass
 - Sin aprobación explícita no hay fill (fail-closed verificado; ni timeouts ni errores aprueban). La aprobación es lo último: pre-flight de pestaña viva primero. Única excepción: un alias con política de auto-relleno activa para ese origin exacto (ver § Sin aprobación por cuenta).
 - Amarre exacto de origen (vault-URL == origen pedido == origen de la pestaña, re-chequeado dentro del script contra TOCTOU).
 - Cada fill deja auditoría redactada (`~/.hermes/keygate-audit.jsonl`).
-- Altas/bajas de credenciales **desde el chat están bloqueadas por política**: los cambios se hacen en tu KeePassXC + sync del `.kdbx`.
+- Creación controlada de credenciales (`keygate_credential_add`): genera contraseñas fuertes server-side en `keepassxc-cli` sin exponerlas al modelo ni al chat, controlada por el switch de la web `:8472` (`ask` / `auto` / `disabled`) y correo por defecto. Las contraseñas existentes solo se cargan por la web autenticada `:8472` o en KeePassXC.
 
 **Dos vaults (el corazón del diseño):**
 

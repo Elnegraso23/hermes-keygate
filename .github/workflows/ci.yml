@@ -24,6 +24,15 @@ jobs:
       - name: Selftest (host fresco)
         run: bash scripts/keygate-selftest.sh
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Full unit + integration tests (con keepassxc-cli)
+        run: |
+          python3 -m pip install -q "pytest==8.4.2" cryptography
+          bash scripts/keygate-test
+
       - name: Secret scan
         # Se usa el CLI de gitleaks, NO la action de gitleaks: la action
         # intenta subir un SARIF/artifact via API y en repos PRIVADOS el

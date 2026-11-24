@@ -1294,10 +1294,12 @@ def _fill_bind_page(task_id: str, bound: str) -> dict:
     page_origin = None
     try:
         page_origin = _focus_bound_origin(task_id, bound, "login")
+        page_origin = getattr(page_origin, "origin", page_origin)
     except Exception:
         page_origin = None
     try:
         page_origin = page_origin or _current_page_origin(task_id)
+        page_origin = getattr(page_origin, "origin", page_origin)
     except Exception:
         return {"error": {"success": False, "filled_fields": 0, "origin": bound,
                           "error_type": "browser_unavailable",
@@ -1411,6 +1413,7 @@ def _native_keygate_fill(task_id: str, alias: str, origin: str, db: str, kf: str
             return {"success": False, "filled_fields": 0, "origin": page_origin,
                     "error": "no login fields found"}
         fills = select_password_fill(classified, secret["password"])
+        fills = kg.augment_signup_password_fills(classified, fills, secret["password"])
         if username:
             ids = [c for c in classified if c.token in ("username", "email", "tel")]
             if ids:

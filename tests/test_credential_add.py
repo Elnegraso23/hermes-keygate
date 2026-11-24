@@ -176,6 +176,20 @@ def test_create_policy_persistence_and_email_validation(tmp_path):
     assert err_e
 
 
+def test_augment_signup_password_fills():
+    """Blind sign-up helper fills Password + Confirm Password (at most 2 fields)."""
+    mk = lambda idx, tok: types.SimpleNamespace(token=tok, control=types.SimpleNamespace(index=idx))
+    classified = [mk(0, "email"), mk(1, "new_password"), mk(2, "confirm_password"), mk(3, "password")]
+    base = [{"index": 1, "token": "new_password", "value": "S3cret!"}]
+    out = kg.augment_signup_password_fills(classified, base, "S3cret!")
+    assert len(out) == 2
+    assert out[1] == {"index": 2, "token": "confirm_password", "value": "S3cret!"}
+
+    # Single password field (normal login) stays untouched
+    login_only = [mk(0, "email"), mk(1, "password")]
+    assert kg.augment_signup_password_fills(login_only, base, "S3cret!") == base
+
+
 # --------------------------------------------------- plugin handler tests ---
 
 def _load_plugin_tools(monkeypatch, home: Path, db: str, kf: str, approval_return="accept",
