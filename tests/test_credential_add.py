@@ -9,6 +9,7 @@ import importlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -30,6 +31,8 @@ import keygate_lib as kg  # noqa: E402
 
 def _make_vault(tmp_path: Path):
     """Create a real keyfile-only .kdbx in tmp_path (never touches real vault)."""
+    if not shutil.which("keepassxc-cli"):
+        pytest.skip("keepassxc-cli not installed")
     db = tmp_path / "hermes.kdbx"
     kf = tmp_path / "agent.key"
     kf.write_bytes(os.urandom(128))
