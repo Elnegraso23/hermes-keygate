@@ -104,7 +104,10 @@ outs = {
         {"alias": "canary-alias-1", "origin": "https://example.com"}),
     "fill-phishing-suffix": T["keygate_request_fill"](
         {"alias": "canary-alias-1", "origin": "https://example.com.evil.com"}),
-    "alias-add-bloqueado": T["keygate_alias_add"]({}),
+    "credential-add-password-blocked": T["keygate_credential_add"](
+        {"alias": "canary-new-1", "origin": "https://example.com",
+         "username": "canaryuser", "password": CANARY}),
+    "alias-add-deprecated": T["keygate_alias_add"]({}),
 }
 print("== superficies que vería el modelo ==")
 for name, out in outs.items():
@@ -142,6 +145,7 @@ try:
             hdrs["Authorization"] = f"Bearer {pw}"
         if data is not None:
             hdrs["Content-Type"] = "application/json"
+            hdrs["Origin"] = "http://127.0.0.1:8479"
         req = urllib.request.Request(
             f"http://127.0.0.1:8479{path}",
             data=json.dumps(data).encode() if data is not None else None,

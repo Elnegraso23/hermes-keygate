@@ -417,7 +417,8 @@ bash ~/hermes-keygate/scripts/keygate-update   # pull + installs + verifies; app
 | `keygate_doctor` | version, DB, channel, browser transport, audit | redacted |
 | `keygate_version` | installed vs GitHub + changelog | versions |
 | `keygate_session_ensure/invalidate` | ephemeral sessions with TTL | opaque handles |
-| `keygate_alias_add` | **always refused by policy** | — |
+| `keygate_credential_add` | creates entry with server-side generated password (`:8472` policy, approval) | metadata only, never values |
+| `keygate_alias_add` | deprecated wrapper for `keygate_credential_add` | metadata only |
 | `KeepassSource keepass` | refs `kpx://alias/field` for API keys | via native SecretSource |
 
 ## Repo structure

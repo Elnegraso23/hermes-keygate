@@ -63,6 +63,35 @@ AUTH_FAIL_MAX = 8  # wrong-password attempts per window per IP
 _ALLOWED_HOSTS = set()
 PW_MIN_LEN = 12
 PW_ITERS = 210_000
+REVEAL_TTL = 120  # seconds for one-shot web reveal tokens
+
+_REVEAL_TOKENS: dict = {}
+_REVEAL_LOCK = threading.Lock()
+
+
+def issue_reveal_token(entry_path: str, alias: str, ttl: int = REVEAL_TTL) -> tuple:
+    """Issue a single-use, in-memory reveal token for a newly generated entry."""
+    now = time.time()
+    tok = secrets.token_urlsafe(24)
+    with _REVEAL_LOCK:
+        for k in [k for k, v in _REVEAL_TOKENS.items() if v.get("exp", 0) <= now]:
+            _REVEAL_TOKENS.pop(k, None)
+        _REVEAL_TOKENS[tok] = {"entry_path": entry_path, "alias": alias, "exp": now + int(ttl)}
+    return tok, int(ttl)
+
+
+def consume_reveal_token(token: str):
+    """Consume a one-shot reveal token. Returns dict or None if missing/expired."""
+    if not token:
+        return None
+    now = time.time()
+    with _REVEAL_LOCK:
+        for k in [k for k, v in _REVEAL_TOKENS.items() if v.get("exp", 0) <= now]:
+            _REVEAL_TOKENS.pop(k, None)
+        rec = _REVEAL_TOKENS.pop(token, None)
+    if not rec or rec.get("exp", 0) <= now:
+        return None
+    return rec
 
 
 def passfile(home: Path) -> Path:
@@ -389,65 +418,175 @@ INDEX_HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>keygate-sync</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#0b0f17" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f5f7fb" media="(prefers-color-scheme: light)">
 <style nonce="__NONCE__">
-:root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--card2:#1c232d;--line:#2a3440;--txt:#e6edf3;
---mut:#8b949e;--acc:#3fb950;--warn:#d29922;--bad:#f85149;--btn:#2f6fed;--btn-h:#388bfd}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);
-font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-.wrap{max-width:820px;margin:0 auto;padding:24px 16px 64px}
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:12px}
-.logo{width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#2f6fed,#3fb950);
-display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 4px 12px rgba(0,0,0,.35)}
-h1{font-size:20px;margin:0}h2{font-size:13px;margin:26px 0 10px;color:var(--mut);
-text-transform:uppercase;letter-spacing:.07em;font-weight:600}
-.sub{color:var(--mut);font-size:13px;margin:0 0 14px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:10px 0}
+:root{
+  color-scheme:light dark;
+  --bg:light-dark(oklch(0.97 0.008 255), oklch(0.145 0.015 255));
+  --bg-glow:light-dark(oklch(0.93 0.03 255 / .55), oklch(0.24 0.05 255 / .35));
+  --card:light-dark(oklch(1 0 0 / .92), oklch(0.195 0.018 255 / .9));
+  --card2:light-dark(oklch(0.96 0.01 255), oklch(0.235 0.02 255));
+  --input-bg:light-dark(oklch(0.985 0.004 255), oklch(0.13 0.014 255));
+  --line:light-dark(oklch(0.88 0.012 255), oklch(0.30 0.022 255));
+  --txt:light-dark(oklch(0.20 0.02 255), oklch(0.94 0.01 255));
+  --mut:light-dark(oklch(0.48 0.02 255), oklch(0.68 0.02 255));
+  --acc:light-dark(oklch(0.54 0.16 148), oklch(0.72 0.17 148));
+  --warn:light-dark(oklch(0.58 0.16 75), oklch(0.78 0.15 80));
+  --bad:light-dark(oklch(0.55 0.20 25), oklch(0.68 0.20 24));
+  --btn:light-dark(oklch(0.54 0.20 258), oklch(0.62 0.20 258));
+  --btn-h:light-dark(oklch(0.48 0.21 258), oklch(0.68 0.20 258));
+  --shadow:light-dark(0 1px 2px oklch(0.2 0.02 255 / .06), 0 8px 24px oklch(0 0 0 / .28));
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;color:var(--txt);min-height:100dvh;
+  background:radial-gradient(900px 420px at 15% -10%, var(--bg-glow), transparent 65%), var(--bg);
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
+  -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;
+}
+.wrap{max-width:880px;margin:0 auto;padding:28px 18px 72px}
+header{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  margin-bottom:18px;flex-wrap:wrap;padding-bottom:14px;
+  border-bottom:1px solid color-mix(in oklch, var(--line) 70%, transparent);
+}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{
+  width:44px;height:44px;border-radius:13px;flex-shrink:0;
+  background:linear-gradient(135deg, var(--btn), var(--acc));
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 8px 20px color-mix(in oklch, var(--btn) 30%, transparent);
+}
+h1{font-size:21px;font-weight:700;letter-spacing:-.02em;margin:0}
+h2{
+  font-size:12px;margin:28px 0 10px;color:var(--mut);
+  text-transform:uppercase;letter-spacing:.09em;font-weight:700;
+}
+.sub{color:var(--mut);font-size:13.5px;margin:0 0 14px;line-height:1.5}
+.card{
+  container-type:inline-size;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 20px;margin:10px 0;box-shadow:var(--shadow);
+  backdrop-filter:blur(10px);transition:border-color .2s ease;
+}
+.card:hover{border-color:color-mix(in oklch, var(--line) 65%, var(--btn) 35%)}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.badge{font-size:12px;padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--mut);background:#0d1117}
-.badge.ok{color:var(--acc);border-color:rgba(63,185,80,.45);background:rgba(63,185,80,.08)}
-.badge.warn{color:var(--warn);border-color:rgba(210,153,34,.45);background:rgba(210,153,34,.08)}
-.badge.bad{color:var(--bad);border-color:rgba(248,81,73,.45);background:rgba(248,81,73,.08)}
-.alias{display:flex;justify-content:space-between;align-items:center;gap:10px;
-padding:11px 4px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.alias:last-child{border-bottom:0}
-.alias b{font-family:ui-monospace,monospace;font-size:14px}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@container (max-width: 520px){.form-grid{grid-template-columns:1fr}}
+.seg{
+  display:inline-flex;flex-wrap:wrap;gap:6px;padding:4px;
+  border-radius:12px;background:var(--input-bg);border:1px solid var(--line);
+}
+.seg-opt{
+  display:inline-flex;align-items:center;gap:7px;padding:7px 13px;
+  border-radius:9px;font-size:13px;font-weight:500;color:var(--mut);
+  cursor:pointer;user-select:none;transition:background .15s,color .15s,box-shadow .15s;
+}
+.seg-opt input{margin:0;accent-color:var(--btn);cursor:pointer}
+.seg-opt:hover{color:var(--txt);background:color-mix(in oklch, var(--card2) 70%, transparent)}
+.seg-opt:has(input:checked){
+  background:color-mix(in oklch, var(--btn) 16%, var(--card));
+  color:var(--txt);box-shadow:inset 0 0 0 1px color-mix(in oklch, var(--btn) 55%, transparent);
+}
+.seg-opt.opt-auto:has(input:checked){
+  background:color-mix(in oklch, var(--acc) 18%, var(--card));
+  color:var(--acc);box-shadow:inset 0 0 0 1px color-mix(in oklch, var(--acc) 55%, transparent);
+}
+.seg-opt.opt-bad:has(input:checked){
+  background:color-mix(in oklch, var(--bad) 16%, var(--card));
+  color:var(--bad);box-shadow:inset 0 0 0 1px color-mix(in oklch, var(--bad) 55%, transparent);
+}
+.badge{
+  display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;
+  padding:4px 11px;border-radius:999px;border:1px solid var(--line);
+  color:var(--mut);background:var(--input-bg);
+}
+.badge.ok{
+  color:var(--acc);border-color:color-mix(in oklch, var(--acc) 45%, transparent);
+  background:color-mix(in oklch, var(--acc) 12%, transparent);
+}
+.badge.warn{
+  color:var(--warn);border-color:color-mix(in oklch, var(--warn) 45%, transparent);
+  background:color-mix(in oklch, var(--warn) 12%, transparent);
+}
+.badge.bad{
+  color:var(--bad);border-color:color-mix(in oklch, var(--bad) 45%, transparent);
+  background:color-mix(in oklch, var(--bad) 12%, transparent);
+}
+.alias{
+  display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:12px 6px;border-bottom:1px solid color-mix(in oklch, var(--line) 75%, transparent);flex-wrap:wrap;
+}
+.alias:last-child{border-bottom:0;padding-bottom:2px}
+.alias b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
 .alias small{color:var(--mut)}
-input[type="password"],input[type="text"],input[type="search"]{
-padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:#0b0e12;color:var(--txt);font-size:14px}
-input:focus{outline:none;border-color:var(--btn-h)}
-button{background:var(--btn);color:#fff;border:0;border-radius:8px;padding:8px 15px;
-font-size:13.5px;font-weight:500;cursor:pointer;transition:.15s}
+input[type="password"],input[type="text"],input[type="search"],input[type="email"]{
+  padding:10px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--input-bg);color:var(--txt);font-size:14px;
+  transition:border-color .15s,box-shadow .15s;
+}
+input[type="password"]:disabled,input[type="text"]:disabled{opacity:.48;cursor:not-allowed}
+input:focus-visible,button:focus-visible{
+  outline:2px solid var(--btn);outline-offset:2px;
+}
+input:focus{border-color:var(--btn);box-shadow:0 0 0 3px color-mix(in oklch, var(--btn) 18%, transparent)}
+button{
+  background:var(--btn);color:#fff;border:0;border-radius:10px;padding:9px 16px;
+  font-size:13.5px;font-weight:600;cursor:pointer;
+  transition:background .15s,transform .08s,border-color .15s;
+}
 button:hover:not(:disabled){background:var(--btn-h)}
-button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+button:active:not(:disabled){transform:translateY(1px)}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);font-weight:500}
 button.ghost:hover:not(:disabled){background:var(--card2);border-color:var(--mut)}
-button.sm{padding:4px 9px;font-size:12px;border-radius:6px}
+button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
 button.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);padding:6px 12px;font-size:13px}
 button:disabled{opacity:.45;cursor:default}
-.drop{border:2px dashed var(--line);border-radius:12px;padding:26px;text-align:center;
-color:var(--mut);cursor:pointer;transition:.15s;background:rgba(13,17,23,.4)}
-.drop:hover,.drop.over{border-color:var(--acc);color:var(--acc);background:rgba(63,185,80,.05)}
-pre{background:#0b0e12;border:1px solid var(--line);border-radius:8px;padding:10px;
-font-size:12px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:10px 0 0}
-.audit{font-family:ui-monospace,monospace;font-size:12px;color:var(--mut)}
-.audit-row{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid rgba(42,52,64,.6);flex-wrap:wrap}
+.drop{
+  border:2px dashed var(--line);border-radius:12px;padding:28px 18px;text-align:center;
+  color:var(--mut);cursor:pointer;transition:.18s;
+  background:color-mix(in oklch, var(--input-bg) 65%, transparent);
+}
+.drop:hover,.drop.over{
+  border-color:var(--acc);color:var(--acc);
+  background:color-mix(in oklch, var(--acc) 8%, transparent);
+}
+pre{
+  background:var(--input-bg);border:1px solid var(--line);border-radius:10px;padding:11px 13px;
+  font-size:12.5px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin:12px 0 0;
+}
+.reveal-code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:600;
+  padding:7px 12px;border-radius:9px;letter-spacing:.03em;
+  background:color-mix(in oklch, var(--acc) 14%, var(--input-bg));
+  border:1px solid color-mix(in oklch, var(--acc) 45%, transparent);color:var(--txt);
+}
+.audit{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--mut)}
+.audit-row{
+  display:flex;align-items:center;gap:8px;padding:7px 2px;
+  border-bottom:1px solid color-mix(in oklch, var(--line) 55%, transparent);flex-wrap:wrap;
+}
 .audit-row:last-child{border-bottom:0}
 .topbar{display:flex;gap:8px;align-items:center}
 .hide{display:none!important}
-footer{color:var(--mut);font-size:12px;margin-top:28px;text-align:center}
-code{background:#0b0e12;padding:2px 6px;border-radius:6px;font-size:13px;border:1px solid var(--line)}
-a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
+footer{color:var(--mut);font-size:12px;margin-top:34px;text-align:center}
+code{
+  background:var(--input-bg);padding:2px 7px;border-radius:6px;
+  font-size:13px;border:1px solid var(--line);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+a{color:var(--btn);text-decoration:none}a:hover{text-decoration:underline}
 .s1.s1{margin:0}
-
-.s3.s3{border-color:var(--warn)}
+.s3.s3{border-color:color-mix(in oklch, var(--warn) 60%, var(--line))}
 .s4.s4{margin-top:0;color:var(--warn)}
 .s5.s5{flex:1;min-width:200px}
 .s6.s6{margin-top:8px}
-.s7.s7{flex:1;min-width:260px}
+.s7.s7{flex:1;min-width:240px}
 .s8.s8{margin:6px 0 0;font-size:12px}
 .s9.s9{margin:8px 0 0;font-size:12px}
-.s10.s10{border-color:var(--acc)}
+.s10.s10{border-color:color-mix(in oklch, var(--acc) 60%, var(--line))}
 .s11.s11{margin-top:0;color:var(--acc)}
 .s12.s12{justify-content:space-between;margin-bottom:8px}
 .s13.s13{font-size:14px}
@@ -457,17 +596,16 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
 .s17.s17{margin:0;flex:1}
 .s18.s18{min-width:210px}
 .s19.s19{margin-top:12px}
-.s20.s20{margin-top:10px}
+.s20.s20{margin-top:12px}
 .s21.s21{margin:8px 0 0}
-.s22.s22{justify-content:space-between;align-items:baseline;margin-top:22px}
+.s22.s22{justify-content:space-between;align-items:baseline;margin-top:26px}
 .s23.s23{margin-left:6px;font-size:11px}
 .s24.s24{gap:6px}
 .s25.s25{display:flex;align-items:center;gap:6px;cursor:pointer}
 .s26.s26{color:var(--mut);min-width:145px}
 .s27.s27{color:var(--txt)}
-.hide{display:none!important}
 [data-tone="mut"]{color:var(--mut)}[data-tone="warn"]{color:var(--warn)}[data-tone="bad"]{color:var(--bad)}[data-tone="acc"]{color:var(--acc)}
-.aoin{width:210px;padding:7px;font-size:13px}
+.aoin{width:210px;padding:7px 10px;font-size:13px}
 </style></head><body><div class="wrap">
 <header>
   <div class="brand"><div class="logo"><svg viewBox="0 0 24 24" width="23" height="23" aria-hidden="true"><path d="M12 2 4.5 5v5.6c0 4.9 3.1 8.2 7.5 9.9 4.4-1.7 7.5-5 7.5-9.9V5L12 2Z" fill="#0b1220" opacity=".35"/><path d="M12 6.2a3.6 3.6 0 0 0-1.7 6.8v3.2a1.7 1.7 0 0 0 3.4 0v-3.2A3.6 3.6 0 0 0 12 6.2Z" fill="#fff"/></svg></div><div><h1>keygate-sync</h1>
@@ -552,6 +690,47 @@ a{color:var(--btn-h);text-decoration:none}a:hover{text-decoration:underline}
     <input class="s18" type="search" id="aliasfilter" placeholder="🔍 Filtrar alias o grupo…" data-oninput="renderAliases">
   </div>
   <div id="aliases"><div class="sub">Cargando…</div></div>
+</div>
+
+<h2>Creación de cuentas por Hermes</h2>
+<div class="card">
+  <div class="sub">Controla si Hermes puede agregar cuentas nuevas (perfiles) a <code>hermes.kdbx</code> con contraseña generada server-side, y define el correo por defecto para crearlas.</div>
+  <div class="seg s6" role="radiogroup" aria-label="Política de creación de cuentas">
+    <label class="seg-opt"><input type="radio" name="cpmode" id="cp_ask" value="ask" checked> Pedir aprobación</label>
+    <label class="seg-opt opt-auto"><input type="radio" name="cpmode" id="cp_auto" value="auto"> Permitir sin aprobación</label>
+    <label class="seg-opt opt-bad"><input type="radio" name="cpmode" id="cp_disabled" value="disabled"> Deshabilitado</label>
+  </div>
+  <div class="row s20">
+    <input class="s7" type="email" id="cp_email" placeholder="Correo por defecto para cuentas nuevas (ej. hermes@midominio.com)" data-enter="saveCreatePolicy">
+    <button data-act="saveCreatePolicy">Guardar configuración</button>
+  </div>
+  <pre class="hide" id="cp_out"></pre>
+</div>
+
+<h2>Agregar credencial (web)</h2>
+<div class="card">
+  <div class="sub">Crea una entrada en <code>hermes.kdbx</code> directamente desde esta web autenticada (fuera del chat). La contraseña generada se crea en el servidor y puede revelarse una sola vez.</div>
+  <div class="form-grid">
+    <input type="text" id="ne_alias" placeholder="Alias (ej. github-agent-1)">
+    <input type="text" id="ne_origin" placeholder="URL exacta (https://sitio.com)">
+    <input type="text" id="ne_user" placeholder="Usuario o correo (usa correo por defecto si vacío)">
+    <input type="text" id="ne_group" placeholder="Grupo opcional (ej. Agent)">
+  </div>
+  <div class="seg s20" role="radiogroup" aria-label="Modo de contraseña">
+    <label class="seg-opt opt-auto"><input type="radio" name="nemode" id="ne_gen" value="generate" data-oninput="syncEntryPwField" checked> Generar contraseña fuerte (24 chars)</label>
+    <label class="seg-opt"><input type="radio" name="nemode" id="ne_man" value="manual" data-oninput="syncEntryPwField"> Escribir contraseña existente</label>
+  </div>
+  <div class="row s20">
+    <input class="s5" type="password" id="ne_pw" placeholder="Contraseña existente (solo modo manual)" autocomplete="new-password" disabled>
+    <button class="ghost sm" type="button" data-act="vis" data-ids="ne_pw" title="Mostrar/ocultar">👁</button>
+    <button data-act="createEntry">Crear en vault</button>
+  </div>
+  <div class="row s20 hide" id="ne_reveal_bar">
+    <button class="ghost" type="button" id="ne_reveal_btn" data-act="revealCreated">👁 Revelar contraseña (1 solo uso)</button>
+    <code class="reveal-code hide" id="ne_reveal_val"></code>
+    <button class="ghost sm hide" type="button" id="ne_copy_btn" data-act="copyRevealed">📋 Copiar</button>
+  </div>
+  <pre class="hide" id="ne_out"></pre>
 </div>
 
 <h2 id="primera">Primera vez (tu PC editor)</h2>
@@ -952,6 +1131,7 @@ async function load() {
   const a = await api('/api/audit?limit=12');
   __lastAuditLines = a.body.lines || [];
   renderAudit();
+  await loadCreatePolicy();
   document.getElementById('obstate').textContent = '⚪ disponible (un solo uso)';
   try {
     const ob = await api('/api/onboarding/state');
@@ -983,6 +1163,123 @@ async function saveAuto(i) {
     return;
   }
   load();
+}
+let __revealToken = '';
+let __revealTimer = null;
+async function loadCreatePolicy() {
+  try {
+    const r = await api('/api/create-policy');
+    if (r.status !== 200 || !r.body || !r.body.success) return;
+    const mode = r.body.mode || 'ask';
+    ['ask', 'auto', 'disabled'].forEach(m => {
+      const el = document.getElementById('cp_' + m);
+      if (el) el.checked = (m === mode);
+    });
+    const em = document.getElementById('cp_email');
+    if (em) em.value = r.body.default_email || '';
+    const nu = document.getElementById('ne_user');
+    if (nu && !nu.value && r.body.default_email) nu.placeholder = 'Por defecto: ' + r.body.default_email;
+  } catch (e) {}
+}
+async function saveCreatePolicy() {
+  const out = document.getElementById('cp_out');
+  out.classList.remove('hide');
+  let mode = 'ask';
+  ['ask', 'auto', 'disabled'].forEach(m => {
+    const el = document.getElementById('cp_' + m);
+    if (el && el.checked) mode = m;
+  });
+  const email = (document.getElementById('cp_email').value || '').trim();
+  const h = Object.assign({'Content-Type': 'application/json'}, authHeaders());
+  const r = await api('/api/create-policy', {method: 'POST', headers: h,
+    body: JSON.stringify({mode: mode, default_email: email})});
+  if (r.status !== 200 || !(r.body && r.body.success)) {
+    out.textContent = '❌ Error: ' + ((r.body && r.body.error) || r.status);
+    return;
+  }
+  out.textContent = '✅ Política guardada (' + r.body.mode + (r.body.default_email ? ' · correo: ' + r.body.default_email : '') + ').';
+  loadCreatePolicy();
+}
+function syncEntryPwField() {
+  const man = document.getElementById('ne_man').checked;
+  const pw = document.getElementById('ne_pw');
+  if (!pw) return;
+  pw.disabled = !man;
+  if (!man) pw.value = '';
+}
+async function createEntry() {
+  const out = document.getElementById('ne_out');
+  out.classList.remove('hide');
+  const bar = document.getElementById('ne_reveal_bar');
+  const rval = document.getElementById('ne_reveal_val');
+  const rcopy = document.getElementById('ne_copy_btn');
+  const rbtn = document.getElementById('ne_reveal_btn');
+  bar.classList.add('hide'); rval.classList.add('hide'); rcopy.classList.add('hide');
+  rval.textContent = ''; __revealToken = '';
+  const alias = (document.getElementById('ne_alias').value || '').trim();
+  const origin = (document.getElementById('ne_origin').value || '').trim();
+  const username = (document.getElementById('ne_user').value || '').trim();
+  const group = (document.getElementById('ne_group').value || '').trim();
+  const mode = document.getElementById('ne_man').checked ? 'manual' : 'generate';
+  const password = document.getElementById('ne_pw').value || '';
+  if (!alias || !origin) { out.textContent = 'Ingresa alias y URL exacta.'; return; }
+  if (mode === 'manual' && !password) { out.textContent = 'Ingresa la contraseña o elige modo generado.'; return; }
+  const payload = {alias: alias, origin: origin, username: username, group: group, mode: mode};
+  if (mode === 'manual') payload.password = password;
+  const h = Object.assign({'Content-Type': 'application/json'}, authHeaders());
+  out.textContent = 'Guardando en vault…';
+  const r = await api('/api/entry', {method: 'POST', headers: h, body: JSON.stringify(payload)});
+  document.getElementById('ne_pw').value = '';
+  if (r.status !== 200 || !(r.body && r.body.success)) {
+    out.textContent = '❌ Rechazado: ' + ((r.body && r.body.error) || r.status);
+    return;
+  }
+  out.textContent = '✅ Credencial creada: ' + r.body.entry_path + ' (' + r.body.origin + ') · usuario: ' + r.body.identifier;
+  if (r.body.reveal_token) {
+    __revealToken = r.body.reveal_token;
+    rbtn.disabled = false;
+    rbtn.textContent = '👁 Revelar contraseña (1 solo uso, ' + (r.body.reveal_ttl || 120) + ' s)';
+    bar.classList.remove('hide');
+  }
+  document.getElementById('ne_alias').value = '';
+  document.getElementById('ne_origin').value = '';
+  load();
+}
+async function revealCreated() {
+  if (!__revealToken) return;
+  const btn = document.getElementById('ne_reveal_btn');
+  const rval = document.getElementById('ne_reveal_val');
+  const rcopy = document.getElementById('ne_copy_btn');
+  btn.disabled = true;
+  const tok = __revealToken;
+  __revealToken = '';
+  const h = Object.assign({'Content-Type': 'application/json'}, authHeaders());
+  const r = await api('/api/entry/reveal', {method: 'POST', headers: h, body: JSON.stringify({token: tok})});
+  if (r.status !== 200 || !(r.body && r.body.success)) {
+    rval.textContent = 'Token expirado o ya usado.';
+    rval.classList.remove('hide');
+    return;
+  }
+  rval.textContent = r.body.password || '';
+  rval.classList.remove('hide');
+  rcopy.classList.remove('hide');
+  clearTimeout(__revealTimer);
+  __revealTimer = setTimeout(() => {
+    rval.textContent = '';
+    rval.classList.add('hide');
+    rcopy.classList.add('hide');
+    btn.textContent = 'Revelación expirada (30 s)';
+  }, 30000);
+}
+async function copyRevealed() {
+  const val = document.getElementById('ne_reveal_val').textContent || '';
+  if (!val || !navigator.clipboard) return;
+  try {
+    await navigator.clipboard.writeText(val);
+    const btn = document.getElementById('ne_copy_btn');
+    btn.textContent = '✓ Copiado';
+    setTimeout(() => { btn.textContent = '📋 Copiar'; }, 1400);
+  } catch (e) {}
 }
 const drop = document.getElementById('drop'), fi = document.getElementById('f');
 drop.onclick = () => fi.click();
@@ -1578,6 +1875,10 @@ class Handler(BaseHTTPRequestHandler):
                               "suggested_origin": sug})
             self._send(200, {"success": True, "locked": False, "items": items})
             return
+        if url.path == "/api/create-policy":
+            pol = kg.load_create_policy(self._home())
+            self._send(200, {"success": True, **pol})
+            return
         self._send(404, {"success": False, "error": "not found"})
 
     def do_POST(self):
@@ -1861,6 +2162,192 @@ class Handler(BaseHTTPRequestHandler):
                                         "enabled": False})
                 self._send(200, {"success": True, "alias": leaf_alias, "enabled": False})
             return
+        if url.path == "/api/create-policy":
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
+            if length <= 0 or length > 4096:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                j = json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            mode_arg = j.get("mode") if "mode" in j else None
+            email_arg = j.get("default_email") if "default_email" in j else None
+            pol, err = kg.set_create_policy(self._home(), mode=mode_arg, default_email=email_arg)
+            if err or not pol:
+                self._send(400, {"success": False, "error": err or "invalid policy"})
+                return
+            try:
+                kg.audit(self._home(), {"ev": "sync", "action": "create-policy",
+                                        "mode": pol["mode"],
+                                        "has_default_email": bool(pol["default_email"])},
+                         strict=True)
+            except kg.AuditError:
+                self._send(500, {"success": False, "error": "audit log unavailable"})
+                return
+            self._send(200, {"success": True, **pol})
+            return
+        if url.path == "/api/entry":
+            # Route C: create/rotate an entry directly from the authenticated web UI
+            # (Bearer + CSRF). Supports server-side generation or manual password.
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
+            if length <= 0 or length > 8192:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                j = json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            live = kg.live_paths()
+            if live:
+                db, kf = live
+            elif kg.vault_sealed():
+                self._send(409, {"success": False, "error_type": "vault_sealed",
+                                 "error": "vault is sealed"})
+                return
+            pol = kg.load_create_policy(self._home())
+            alias = str(j.get("alias") or "").strip()
+            origin = str(j.get("origin") or "").strip()
+            username = str(j.get("username") or "").strip() or str(pol.get("default_email") or "").strip()
+            group = str(j.get("group") or "").strip()
+            mode = str(j.get("mode") or "generate").strip().lower()
+            rotate = bool(j.get("rotate", False))
+            pw_len = j.get("length", 24)
+            generate = (mode != "manual")
+            pw_val = None if generate else str(j.get("password") or "")
+            if not generate and not pw_val:
+                self._send(400, {"success": False, "error": "password required in manual mode"})
+                return
+            pre = kg.precheck_add_entry(db, kf, alias, origin, username, group=group, rotate=rotate)
+            if not pre.get("ok"):
+                et = pre.get("error_type", "write_failed")
+                code = 409 if et in ("alias_exists", "vault_locked", "db_password_missing", "domain_mismatch") else 400
+                self._send(code, {"success": False, "error_type": et, "error": pre["error"]})
+                return
+            action = "rotate" if pre.get("is_rotate") else "create"
+            try:
+                kg.audit(self._home(), {"ev": "sync", "action": f"entry-{action}-intent",
+                                        "alias": kg.redact_label(pre["alias"]),
+                                        "origin": kg.redact_origin(pre["origin"]),
+                                        "generated": generate}, strict=True)
+            except kg.AuditError:
+                self._send(500, {"success": False, "error_type": "audit_unavailable",
+                                 "error": "audit log unavailable"})
+                return
+            res = kg.add_entry(
+                db, kf,
+                alias=pre["alias"], origin=pre["origin"], username=pre["username"],
+                password=pw_val, generate=generate, length=pw_len,
+                group=group, rotate=rotate, backup_keep=keep,
+            )
+            pw_val = None
+            if not res.get("success"):
+                et = res.get("error_type", "write_failed")
+                self._send(400 if et.startswith("invalid_") else 500,
+                           {"success": False, "error_type": et, "error": res.get("error", "write failed")})
+                return
+            kg.index_put(self._home(), res["alias"], res["origin"])
+            try:
+                kg.audit(self._home(), {"ev": "sync", "action": f"entry-{action}",
+                                        "alias": kg.redact_label(res["alias"]),
+                                        "origin": kg.redact_origin(res["origin"]),
+                                        "before": res.get("entries_before"),
+                                        "after": res.get("entries_after"),
+                                        "generated": generate}, strict=True)
+            except kg.AuditError:
+                pass
+            resp = {
+                "success": True,
+                "created": res["created"],
+                "rotated": res["rotated"],
+                "alias": res["alias"],
+                "entry_path": res["entry_path"],
+                "origin": res["origin"],
+                "identifier": res["identifier"],
+                "generated": res["generated"],
+                "length": res["length"],
+            }
+            if generate:
+                tok, ttl = issue_reveal_token(res["entry_path"], res["alias"])
+                resp["reveal_token"] = tok
+                resp["reveal_ttl"] = ttl
+            self._send(200, resp)
+            return
+        if url.path == "/api/entry/reveal":
+            # One-shot reveal of a password strictly for the authenticated web human
+            # (Bearer + CSRF + Cache-Control: no-store + strict audit). Never for the model.
+            if not self._csrf_ok(want_json=True):
+                return
+            length = self._content_length()
+            if length <= 0 or length > 2048:
+                self._send(400, {"success": False, "error": "bad request size"})
+                return
+            try:
+                j = json.loads(self.rfile.read(length).decode("utf-8"))
+            except Exception:
+                self._send(400, {"success": False, "error": "bad json"})
+                return
+            live = kg.live_paths()
+            if live:
+                db, kf = live
+            elif kg.vault_sealed():
+                self._send(409, {"success": False, "error_type": "vault_sealed",
+                                 "error": "vault is sealed"})
+                return
+            tok = str(j.get("token") or "").strip()
+            alias_req = str(j.get("alias") or "").strip()
+            if tok:
+                rec = consume_reveal_token(tok)
+                if not rec:
+                    self._send(410, {"success": False, "error": "reveal token expired or already used"})
+                    return
+                entry_path = rec["entry_path"]
+                alias_lbl = rec["alias"]
+                source = "web-oneshot-token"
+            elif alias_req:
+                resolved, rerr = kg.resolve_entry(db, kf, alias_req)
+                if not resolved:
+                    self._send(404, {"success": False, "error": rerr or "alias not found"})
+                    return
+                entry_path = resolved
+                alias_lbl = resolved.split("/")[-1]
+                source = "web-alias"
+            else:
+                self._send(400, {"success": False, "error": "token or alias required"})
+                return
+            try:
+                kg.audit(self._home(), {"ev": "reveal",
+                                        "alias": kg.redact_label(alias_lbl),
+                                        "source": source}, strict=True)
+            except kg.AuditError:
+                self._send(500, {"success": False, "error_type": "audit_unavailable",
+                                 "error": "audit log unavailable"})
+                return
+            pw = kg.show_field(db, kf, entry_path, "password") or ""
+            pw_b = bytearray(pw.encode("utf-8"))
+            try:
+                if not pw:
+                    self._send(404, {"success": False, "error": "password empty or unreadable"})
+                    return
+                body_bytes = json.dumps({"success": True, "alias": alias_lbl,
+                                         "password": pw}).encode("utf-8")
+                self.send_response(200)
+                self._send_sec_headers(no_store=True)
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body_bytes)))
+                self.end_headers()
+                self.wfile.write(body_bytes)
+            finally:
+                kg.zeroize(pw_b)
+                pw = ""
+            return
         if not self._csrf_ok(want_json=False):
             return
         length = self._content_length()
@@ -1890,23 +2377,24 @@ class Handler(BaseHTTPRequestHandler):
                 staging = tf.name
             replaced = False
             try:
-                before = count_entries(db, kf) if Path(db).exists() else 0
-                # validate staging against the HOST keyfile:
-                staged_n = self._count_with(staging, kf)
-                if staged_n < 1:
-                    self._send(400, {"success": False,
-                                     "error": "staging opens but holds 0 entries — refused (anti-wipe)"})
-                    return
-                backup_db(db, keep)
-                try:
-                    os.replace(staging, db)
-                except OSError:
-                    # Cross-device fallback (shouldn't happen now that staging
-                    # is next to the DB, but fail safe, never fail loud).
-                    shutil.move(staging, db)
-                replaced = True
-                os.chmod(db, 0o600)
-                after = count_entries(db, kf)
+                with kg.db_lock(db):
+                    before = count_entries(db, kf) if Path(db).exists() else 0
+                    # validate staging against the HOST keyfile:
+                    staged_n = self._count_with(staging, kf)
+                    if staged_n < 1:
+                        self._send(400, {"success": False,
+                                         "error": "staging opens but holds 0 entries — refused (anti-wipe)"})
+                        return
+                    backup_db(db, keep)
+                    try:
+                        os.replace(staging, db)
+                    except OSError:
+                        # Cross-device fallback (shouldn't happen now that staging
+                        # is next to the DB, but fail safe, never fail loud).
+                        shutil.move(staging, db)
+                    replaced = True
+                    os.chmod(db, 0o600)
+                    after = count_entries(db, kf)
                 audit_ev(self._home(), {"ev": "sync", "action": "replace",
                                         "sha256": hashlib.sha256(data).hexdigest()[:16],
                                         "before": before, "after": after})

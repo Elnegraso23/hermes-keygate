@@ -12,6 +12,7 @@ Security boundaries:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import ctypes
 import ipaddress
 import json
@@ -25,7 +26,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 TIMEOUT = 30.0
@@ -402,19 +403,25 @@ def list_entries(db: str, keyfile: str) -> List[str]:
     if p.returncode != 0:
         return []
     out = []
-    group = ""
+    stack: List[Tuple[int, str]] = []
     for line in (p.stdout or "").splitlines():
         t = line.strip()
         # Skip headers/placeholders (locale-dependent "[empty]"/"[vacío]").
         if not t or t.startswith("Entries") or re.fullmatch(r"\[.*\]", t):
             continue
         if t == "/":
-            group = ""
+            stack.clear()
             continue
+        indent = len(line) - len(line.lstrip(" "))
         if t.endswith("/"):  # group header: following entries hang under it
-            group = t
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            stack.append((indent, t.rstrip("/")))
             continue
-        full = f"{group}{t}" if group else t
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        prefix = "/".join(g for _, g in stack)
+        full = f"{prefix}/{t}" if prefix else t
         # `rm` moves entries to the recycle bin instead of hard-deleting;
         # `ls -R` still shows them — blind tools must ignore them.
         if is_trash_path(full):
@@ -946,3 +953,451 @@ def live_shred(home: Optional[Path] = None) -> None:
         except Exception:
             pass
     live_clear(home)
+
+
+# ----------------------------------------- write lock, backups & add_entry ---
+
+_DB_WRITE_THREAD_LOCK = threading.Lock()
+_CREATE_POLICY_LOCK = threading.Lock()
+CREATE_POLICY_NAME = "keygate-create-policy.json"
+CREATE_MODES = ("ask", "auto", "disabled")
+CREATE_AUTO_MAX = 5
+CREATE_AUTO_WINDOW = 60.0
+_create_hits: Dict[str, List[float]] = {}
+_create_rate_lock = threading.Lock()
+
+
+@contextmanager
+def db_lock(db: str) -> Iterator[None]:
+    """Serialize writes to a .kdbx across threads and processes (flock).
+
+    Lock file lives next to the DB (`<db>.lock`, mode 0600) so plugin and
+    keygate-sync never race on staging/os.replace.
+    """
+    lock_path = Path(str(db) + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _DB_WRITE_THREAD_LOCK:
+        fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            try:
+                os.chmod(lock_path, 0o600)
+            except OSError:
+                pass
+            if os.name == "posix":
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if os.name == "posix":
+                    import fcntl
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def rotate_backups(db: str, keep: int = 5) -> None:
+    p = Path(db)
+    existing = sorted(p.parent.glob(p.name + ".*.bak"), key=lambda x: x.stat().st_mtime)
+    if keep > 0 and len(existing) > keep:
+        for old in existing[: len(existing) - keep]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+
+
+def backup_db(db: str, keep: int = 5) -> str:
+    """Copy current DB to `<db>.<ts>.bak` (0600) and rotate to `keep`."""
+    ts = int(time.time())
+    dst = f"{db}.{ts}.bak"
+    if Path(dst).exists():
+        dst = f"{db}.{ts}.{time.time_ns() % 1_000_000:06d}.bak"
+    shutil.copy2(db, dst)
+    os.chmod(dst, 0o600)
+    rotate_backups(db, keep)
+    return dst
+
+
+def create_policy_path(home: Path | str) -> Path:
+    h = Path(home) if isinstance(home, (str, Path)) else Path.home() / ".hermes"
+    return h / CREATE_POLICY_NAME
+
+
+def validate_email(email: str) -> Tuple[str, Optional[str]]:
+    """Basic sanity check for default signup email (empty is allowed = unset)."""
+    s = (email or "").strip()
+    if not s:
+        return "", None
+    if len(s) > 254 or any(ord(c) < 0x21 or ord(c) == 0x7f for c in s):
+        return "", "invalid email address"
+    if s.count("@") != 1:
+        return "", "invalid email address"
+    local, domain = s.split("@", 1)
+    if not local or not domain or "." not in domain or domain.startswith(".") or domain.endswith("."):
+        return "", "invalid email address"
+    return s, None
+
+
+def load_create_policy(home: Path | str) -> dict:
+    """Global policy for Hermes credential creation + default signup email.
+
+    mode:
+      - 'ask'      (default): requires explicit human approval per creation.
+      - 'auto'     : Hermes can create new entries without prompt (rate-limited,
+                     audited; rotate still asks; cron/one-shot always denied).
+      - 'disabled' : creation from Hermes is blocked (policy_blocked).
+    default_email: optional non-secret email used when username is omitted.
+    """
+    fp = create_policy_path(home)
+    try:
+        if fp.exists():
+            data = json.loads(fp.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                mode = str(data.get("mode") or "ask").strip().lower()
+                if mode not in CREATE_MODES:
+                    mode = "ask"
+                email, err = validate_email(str(data.get("default_email") or ""))
+                return {
+                    "version": 1,
+                    "mode": mode,
+                    "default_email": email if not err else "",
+                    "updated": int(data.get("updated") or 0),
+                }
+    except Exception:
+        pass
+    return {"version": 1, "mode": "ask", "default_email": "", "updated": 0}
+
+
+def save_create_policy(home: Path | str, data: dict) -> None:
+    fp = create_policy_path(home)
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=str(fp.parent),
+            prefix=".keygate-create-policy-", suffix=".tmp", delete=False,
+        ) as tf:
+            tmp_name = tf.name
+            json.dump(data, tf, ensure_ascii=False, indent=2, sort_keys=True)
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, fp)
+    except Exception:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink()
+            except Exception:
+                pass
+        raise
+
+
+def set_create_policy(
+    home: Path | str,
+    mode: Optional[str] = None,
+    default_email: Optional[str] = None,
+) -> Tuple[Optional[dict], Optional[str]]:
+    """Update create policy atomically. Returns (policy_dict, error_message)."""
+    with _CREATE_POLICY_LOCK:
+        cur = load_create_policy(home)
+        if mode is not None:
+            m = str(mode).strip().lower()
+            if m not in CREATE_MODES:
+                return None, f"mode must be one of {', '.join(CREATE_MODES)}"
+            cur["mode"] = m
+        if default_email is not None:
+            cleaned, err = validate_email(str(default_email))
+            if err:
+                return None, err
+            cur["default_email"] = cleaned
+        cur["version"] = 1
+        cur["updated"] = int(time.time())
+        save_create_policy(home, cur)
+        return cur, None
+
+
+def create_rate_ok(bucket: str = "global") -> bool:
+    """Sliding-window cap for auto credential creations (loop protection)."""
+    key = (bucket or "global").lower()
+    now = time.time()
+    with _create_rate_lock:
+        arr = [t for t in _create_hits.get(key, []) if now - t < CREATE_AUTO_WINDOW]
+        if len(arr) >= CREATE_AUTO_MAX:
+            _create_hits[key] = arr
+            return False
+        arr.append(now)
+        _create_hits[key] = arr
+        return True
+
+
+def validate_alias(alias: str) -> Tuple[str, Optional[str]]:
+    """Validate an entry title/alias (no slashes, control chars, or trash)."""
+    s = (alias or "").strip()
+    if not s:
+        return "", "alias required"
+    if len(s) > 128:
+        return "", "alias too long (max 128 chars)"
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in s):
+        return "", "alias contains control characters"
+    if "/" in s or "\\" in s or ".." in s:
+        return "", "alias must not contain path separators (use 'group' separately)"
+    if is_trash_path(s):
+        return "", "alias cannot target recycle bin"
+    return s, None
+
+
+def validate_group(group: str) -> Tuple[str, Optional[str]]:
+    """Validate an optional KeePass group path (e.g. 'Agent' or 'Agent/Social')."""
+    s = (group or "").strip().strip("/")
+    if not s:
+        return "", None
+    if len(s) > 128:
+        return "", "group too long (max 128 chars)"
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in s):
+        return "", "group contains control characters"
+    if "\\" in s:
+        return "", "group must use '/' separators"
+    parts = [p.strip() for p in s.split("/")]
+    if any(not p or p in (".", "..") for p in parts):
+        return "", "invalid group path"
+    clean = "/".join(parts)
+    if is_trash_path(clean):
+        return "", "group cannot target recycle bin"
+    return clean, None
+
+
+def _db_needs_password_error(db: str, keyfile: str) -> str:
+    """Distinguish db_password_missing from generic vault_locked."""
+    if db_uses_password():
+        return "vault_locked"
+    try:
+        p = subprocess.run(
+            [_kxc(), "ls", "-k", keyfile, "--no-password", "-q", "--", db],
+            env=_child_env(), stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=8,
+        )
+        err = ((p.stderr or "") + " " + (p.stdout or "")).lower()
+        if any(w in err for w in ("password", "credential", "invalid", "clave", "contrase")):
+            return "db_password_missing"
+    except Exception:
+        pass
+    return "vault_locked"
+
+
+def precheck_add_entry(
+    db: str,
+    keyfile: str,
+    alias: str,
+    origin: str,
+    username: str,
+    group: str = "",
+    rotate: bool = False,
+) -> dict:
+    """Validate inputs + vault state before prompting for human approval.
+
+    Returns {"ok": True, "alias", "group", "origin", "username", "entry_path",
+    "existing_path", "is_rotate"} or {"ok": False, "error_type", "error"}.
+    Never reads or returns any password.
+    """
+    clean_alias, aerr = validate_alias(alias)
+    if aerr:
+        return {"ok": False, "error_type": "invalid_alias", "error": aerr}
+    clean_group, gerr = validate_group(group)
+    if gerr:
+        return {"ok": False, "error_type": "invalid_alias", "error": gerr}
+    norm_origin = normalize_origin(origin)
+    if not norm_origin:
+        return {"ok": False, "error_type": "invalid_origin",
+                "error": "origin must be a valid http(s)://host URL"}
+    clean_user = (username or "").strip()
+    if not clean_user or len(clean_user) > 256 or any(ord(c) < 0x20 or ord(c) == 0x7f for c in clean_user):
+        return {"ok": False, "error_type": "invalid_username",
+                "error": "username required (or configure default_email in keygate-sync web)"}
+    try:
+        _kxc()
+    except Exception:
+        return {"ok": False, "error_type": "kxc_missing",
+                "error": f"keepassxc-cli not available — {install_hint()}"}
+    if not Path(db).is_file() or not Path(keyfile).is_file():
+        return {"ok": False, "error_type": "vault_locked",
+                "error": "operative DB or keyfile not found"}
+    if db_locked(db, keyfile):
+        et = _db_needs_password_error(db, keyfile)
+        msg = ("operative DB requires master password (KEYGATE_DB_PASSWORD not set)"
+               if et == "db_password_missing"
+               else "operative DB locked — unlock hermes.kdbx locally")
+        return {"ok": False, "error_type": et, "error": msg}
+
+    entries = list_entries(db, keyfile)
+    entry_path = f"{clean_group}/{clean_alias}" if clean_group else clean_alias
+    leaf_matches = [e for e in entries if e.split("/")[-1] == clean_alias]
+    if not rotate:
+        if entry_path in entries or leaf_matches:
+            return {"ok": False, "error_type": "alias_exists",
+                    "error": f"alias {redact_label(clean_alias)!r} already exists (pass rotate=true to regenerate)"}
+        return {"ok": True, "alias": clean_alias, "group": clean_group,
+                "origin": norm_origin, "username": clean_user,
+                "entry_path": entry_path, "existing_path": None, "is_rotate": False}
+
+    # rotate=True
+    if len(leaf_matches) > 1 and entry_path not in entries:
+        return {"ok": False, "error_type": "ambiguous_alias",
+                "error": f"ambiguous alias {redact_label(clean_alias)!r} in {len(leaf_matches)} groups"}
+    existing_path = entry_path if entry_path in entries else (leaf_matches[0] if leaf_matches else None)
+    if existing_path:
+        existing_url = show_field(db, keyfile, existing_path, "url") or ""
+        if not origins_match(existing_url, norm_origin):
+            return {"ok": False, "error_type": "domain_mismatch",
+                    "error": "vault entry URL does not match requested origin — rotation refused"}
+        return {"ok": True, "alias": clean_alias, "group": clean_group,
+                "origin": norm_origin, "username": clean_user,
+                "entry_path": existing_path, "existing_path": existing_path, "is_rotate": True}
+    return {"ok": True, "alias": clean_alias, "group": clean_group,
+            "origin": norm_origin, "username": clean_user,
+            "entry_path": entry_path, "existing_path": None, "is_rotate": False}
+
+
+def add_entry(
+    db: str,
+    keyfile: str,
+    alias: str,
+    origin: str,
+    username: str,
+    password: Optional[str] = None,
+    generate: bool = True,
+    length: int = 24,
+    group: str = "",
+    rotate: bool = False,
+    backup_keep: int = 5,
+) -> dict:
+    """Create (or rotate) a KeePassXC entry atomically, without leaking secrets.
+
+    - Acquires `<db>.lock` (flock) to serialize writes between plugin and sync.
+    - Stages a copy on the SAME filesystem as `db` (no EXDEV).
+    - Uses `keepassxc-cli add`/`edit` with `-g -L <len> -l -U -n -s --every-group`
+      when `generate=True`, or `-p` via stdin (never argv) when `generate=False`.
+    - Verifies the staged DB opens with `keyfile`, passes anti-wipe, and stores
+      the expected URL/username and a non-empty password.
+    - Backs up the previous DB (`backup_db`), atomically replaces with
+      `os.replace`, and enforces 0600 permissions.
+    - Returns metadata only — never the password.
+    """
+    try:
+        pw_len = max(16, min(64, int(length if length is not None else 24)))
+    except (ValueError, TypeError):
+        pw_len = 24
+    if not generate and not (password or ""):
+        return {"success": False, "error_type": "write_failed",
+                "error": "password required when generate=False"}
+
+    pw_buf = bytearray((password or "").encode("utf-8")) if (not generate and password) else bytearray()
+    try:
+        pre = precheck_add_entry(db, keyfile, alias, origin, username, group=group, rotate=rotate)
+        if not pre.get("ok"):
+            return {"success": False, "error_type": pre["error_type"], "error": pre["error"]}
+
+        with db_lock(db):
+            # Re-check inside the lock to avoid TOCTOU races with concurrent writers.
+            pre = precheck_add_entry(db, keyfile, alias, origin, username, group=group, rotate=rotate)
+            if not pre.get("ok"):
+                return {"success": False, "error_type": pre["error_type"], "error": pre["error"]}
+
+            clean_alias = pre["alias"]
+            clean_group = pre["group"]
+            norm_origin = pre["origin"]
+            clean_user = pre["username"]
+            target_path = pre["entry_path"]
+            is_rotate = bool(pre["is_rotate"])
+            entries_before = list_entries(db, keyfile)
+
+            db_parent = Path(db).parent
+            staging = ""
+            replaced = False
+            try:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, prefix=".keygate-stage-", suffix=".kdbx",
+                    dir=str(db_parent),
+                ) as tf:
+                    staging = tf.name
+                shutil.copy2(db, staging)
+                os.chmod(staging, 0o600)
+
+                # Ensure intermediate groups exist when creating under a group.
+                if not is_rotate and clean_group:
+                    accum = []
+                    for part in clean_group.split("/"):
+                        accum.append(part)
+                        _run_kxc(["mkdir", *kxc_auth(keyfile), "-q", "--", staging, "/".join(accum)])
+
+                subcmd = "edit" if is_rotate else "add"
+                args = [subcmd, *kxc_auth(keyfile), "-q",
+                        "-u", clean_user, "--url", norm_origin]
+                stdin_data: Optional[str] = None
+                if generate:
+                    args += ["-g", "-L", str(pw_len), "-l", "-U", "-n", "-s", "--every-group"]
+                else:
+                    args += ["-p"]
+                    prefix = (os.environ.get(DB_PASSWORD_ENV, "") + "\n") if db_uses_password() else ""
+                    stdin_data = prefix + pw_buf.decode("utf-8") + "\n"
+                args += ["--", staging, target_path]
+
+                proc = _run_kxc(args, stdin_data=stdin_data)
+                if stdin_data is not None:
+                    stdin_data = ""
+                if proc.returncode != 0:
+                    return {"success": False, "error_type": "write_failed",
+                            "error": f"keepassxc-cli {subcmd} failed (exit {proc.returncode})"}
+
+                # Verify staged DB integrity + anti-wipe before replacing.
+                entries_after = list_entries(staging, keyfile)
+                min_expected = max(1, len(entries_before))
+                if len(entries_after) < min_expected:
+                    return {"success": False, "error_type": "write_failed",
+                            "error": "staging failed anti-wipe verification"}
+
+                resolved, rerr = resolve_entry(staging, keyfile, target_path)
+                if not resolved:
+                    return {"success": False, "error_type": "write_failed",
+                            "error": rerr or "created entry could not be verified"}
+                got_url = show_field(staging, keyfile, resolved, "url") or ""
+                got_user = show_field(staging, keyfile, resolved, "username") or ""
+                if not origins_match(got_url, norm_origin) or got_user != clean_user:
+                    return {"success": False, "error_type": "write_failed",
+                            "error": "staged entry metadata mismatch"}
+                got_pw = show_field(staging, keyfile, resolved, "password") or ""
+                pw_ok = bool(got_pw)
+                if got_pw:
+                    zeroize(bytearray(got_pw.encode("utf-8")))
+                    got_pw = ""
+                if not pw_ok:
+                    return {"success": False, "error_type": "write_failed",
+                            "error": "staged entry has empty password"}
+
+                backup_db(db, keep=backup_keep)
+                os.chmod(staging, 0o600)
+                os.replace(staging, db)
+                replaced = True
+                os.chmod(db, 0o600)
+
+                return {
+                    "success": True,
+                    "created": not is_rotate,
+                    "rotated": is_rotate,
+                    "alias": clean_alias,
+                    "entry_path": resolved,
+                    "origin": norm_origin,
+                    "identifier": clean_user,
+                    "generated": bool(generate),
+                    "length": pw_len if generate else None,
+                    "entries_before": len(entries_before),
+                    "entries_after": len(entries_after),
+                }
+            finally:
+                if staging and not replaced:
+                    try:
+                        Path(staging).unlink()
+                    except Exception:
+                        pass
+    finally:
+        zeroize(pw_buf)
+        password = None

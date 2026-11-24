@@ -41,7 +41,12 @@ never pasted, never in chat.
 - `store_mode` defaults to `live` (no copy anywhere). `mirror` keeps an
   encrypted copy in keygate's own store (key, or key+passphrase via
   `scripts/keygate-store`).
-- `keygate_alias_add` is policy-blocked: credentials are never created from chat.
+- `keygate_credential_add` (and deprecated wrapper `keygate_alias_add`) creates
+  a new login in `hermes.kdbx` with a strong password generated server-side by
+  `keepassxc-cli` (never seen by the model or chat), governed by the web policy
+  in `:8472` (`ask` / `auto` / `disabled`) and optional `default_email`. Never
+  pass a `password` parameter; for pre-existing passwords, direct the user to
+  the authenticated `:8472` web form or KeePassXC.
 - Never `execute_code`/`curl` with credentials. Never type a password yourself.
 - If a fill is refused for origin mismatch, STOP and tell the user (phishing guard).
 - Origin matching is strict: `http://` vs `https://`, a suffix or a prefix all

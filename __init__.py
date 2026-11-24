@@ -694,10 +694,17 @@ def register(ctx):
         del params, kw
         cfg = _plug_cfg()
         db, kf = kg.cfg_paths(cfg)
+        live = kg.live_paths()
+        if live:
+            db, kf = live
         locked = kg.db_locked(db, kf)
         n = 0 if locked else len(kg.list_entries(db, kf))
-        return json.dumps({"success": True, "locked": locked, "entries": n,
-                           "db": kg.redact_origin(db)})
+        pol = kg.load_create_policy(_home())
+        return json.dumps({"success": True, "locked": locked,
+                           "sealed": kg.vault_sealed(), "entries": n,
+                           "db": kg.redact_origin(db),
+                           "create_policy": {"mode": pol.get("mode", "ask"),
+                                             "default_email": pol.get("default_email", "")}})
 
     ctx.register_tool(
         name="keygate_status",
@@ -786,20 +793,228 @@ def register(ctx):
                                "required": ["domain"]}},
         handler=h_sess_inv)
 
-    # ---- keygate_alias_add: BLOCKED by policy (no secret creation from chat) ----
+    # ---- keygate_credential_add (+ deprecated keygate_alias_add wrapper) ----
+    _SECRET_PARAM_KEYS = frozenset({"password", "pass", "passwd", "secret", "totp", "otp_secret"})
+
+    def _run_credential_add(params, via: str = "keygate_credential_add") -> dict:
+        p = params if isinstance(params, dict) else {}
+        # Invariant 1 & Decision 2: the agent must NEVER receive or pass a password.
+        if any(str(k).strip().lower() in _SECRET_PARAM_KEYS for k in p.keys()):
+            return {"success": False, "error_type": "policy_blocked",
+                    "error": ("Passing passwords through chat/tool parameters is forbidden. "
+                              "Use keygate_credential_add (server-side generated password) or "
+                              "add existing credentials via the keygate-sync web UI (:8472).")}
+
+        # Unattended guard (cron / one-shot denied; interactive CLI/Desktop/Telegram allowed).
+        _ch = _channel_diag()
+        if _ch.get("cron") or _ch.get("single_query"):
+            return {"success": False, "error_type": "policy_blocked",
+                    "error": ("this session cannot create credentials (cron/one-shot): "
+                              "run from an interactive CLI/Desktop/Telegram session")}
+
+        pol = kg.load_create_policy(_home())
+        mode = str(pol.get("mode") or "ask").strip().lower()
+        if mode == "disabled":
+            return {"success": False, "error_type": "policy_blocked",
+                    "error": ("Credential creation from Hermes is disabled in keygate-sync "
+                              "web settings (:8472).")}
+
+        cfg = _plug_cfg()
+        db, kf = kg.cfg_paths(cfg)
+        live = kg.live_paths()
+        if live:
+            db, kf = live
+        elif kg.vault_sealed():
+            return {"success": False, "locked": True, "error_type": "vault_sealed",
+                    "error": ("vault cifrado en reposo: pide a la persona que ejecute "
+                              "`scripts/keygate-vault open -- <comando>` y teclee la passphrase")}
+
+        alias = str(p.get("alias") or "").strip()
+        origin = str(p.get("origin") or "").strip()
+        username = str(p.get("username") or "").strip() or str(pol.get("default_email") or "").strip()
+        group = str(p.get("group") or "").strip()
+        rotate = bool(p.get("rotate", False))
+        try:
+            length = int(p.get("length") if p.get("length") is not None else 24)
+        except (ValueError, TypeError):
+            length = 24
+        length = max(16, min(64, length))
+
+        # Pre-validate BEFORE prompting so invalid inputs never waste an approval.
+        pre = kg.precheck_add_entry(db, kf, alias, origin, username, group=group, rotate=rotate)
+        if not pre.get("ok"):
+            return {"success": False, "error_type": pre["error_type"], "error": pre["error"]}
+
+        clean_alias = pre["alias"]
+        norm_origin = pre["origin"]
+        is_rotate = bool(pre["is_rotate"])
+        action = "rotate" if is_rotate else "create"
+
+        # Approval policy:
+        # - mode == "auto" allows NEW creations without prompt (audited, no rate cap).
+        # - rotate=True ALWAYS requires explicit separate human approval (Decision 4).
+        # - mode == "ask" (default) requires human approval per creation.
+        if mode == "auto" and not is_rotate:
+            approval_evidence = {"approval": "auto-policy", "policy": "create-auto"}
+        else:
+            try:
+                from tools.approval_prompt import request_elicitation_consent
+                if is_rotate:
+                    prompt_q = (f"Rotate (OVERWRITE) password for existing login "
+                                f"{kg.redact_label(clean_alias)} on {norm_origin}?")
+                    prompt_body = (
+                        "Hermes wants KeePassXC to generate a NEW strong password and "
+                        "overwrite the existing entry (backup is created first). "
+                        "The password is generated server-side and never enters chat, logs, or model context."
+                    )
+                    title = "Allow credential rotation?"
+                else:
+                    prompt_q = (f"Create login {kg.redact_label(clean_alias)} for "
+                                f"{norm_origin} with a generated password?")
+                    prompt_body = (
+                        "Hermes wants KeePassXC to create this entry with a server-side generated "
+                        f"password ({length} chars) for user {kg.redact_user(username)}. "
+                        "The password never enters chat, logs, or model context."
+                    )
+                    title = "Allow credential creation?"
+                decision = request_elicitation_consent(
+                    prompt_q, prompt_body, surface="keygate-create", title=title)
+            except Exception:
+                return {"success": False, "error_type": "approval_unavailable",
+                        "error": "approval prompt unavailable in this session"}
+            approval_evidence = {"approval": str(decision)}
+            if decision != "accept":
+                kg.audit(_home(), {"ev": "credential_add", "action": action,
+                                   "alias": kg.redact_label(clean_alias),
+                                   "origin": kg.redact_origin(norm_origin),
+                                   "decision": "deny", "via": via,
+                                   **approval_evidence})
+                return {"success": False, "error_type": "approval_denied",
+                        "error": "user denied (explicit approval required)",
+                        "channel": _ch}
+
+        # Fail-closed audit BEFORE touching the .kdbx.
+        try:
+            kg.audit(_home(), {"ev": "credential_add", "action": action,
+                               "alias": kg.redact_label(clean_alias),
+                               "origin": kg.redact_origin(norm_origin),
+                               "user": kg.redact_user(username),
+                               "decision": "intent", "via": via,
+                               **approval_evidence}, strict=True)
+        except kg.AuditError:
+            return {"success": False, "error_type": "audit_unavailable",
+                    "error": "audit log not writable — credential creation aborted (fail-closed)"}
+
+        res = kg.add_entry(
+            db, kf,
+            alias=clean_alias,
+            origin=norm_origin,
+            username=username,
+            password=None,
+            generate=True,
+            length=length,
+            group=group,
+            rotate=rotate,
+        )
+        if not res.get("success"):
+            kg.audit(_home(), {"ev": "credential_add", "action": action,
+                               "alias": kg.redact_label(clean_alias),
+                               "origin": kg.redact_origin(norm_origin),
+                               "decision": res.get("error_type", "write_failed"),
+                               "via": via, **approval_evidence})
+            return {"success": False,
+                    "error_type": res.get("error_type", "write_failed"),
+                    "error": res.get("error", "write failed")}
+
+        kg.index_put(_home(), res["alias"], res["origin"])
+        try:
+            kg.audit(_home(), {"ev": "credential_add", "action": action,
+                               "alias": kg.redact_label(res["alias"]),
+                               "origin": kg.redact_origin(res["origin"]),
+                               "decision": "allow",
+                               "before": res.get("entries_before"),
+                               "after": res.get("entries_after"),
+                               "generated": True, "length": res.get("length"),
+                               "via": via, **approval_evidence}, strict=True)
+        except kg.AuditError:
+            pass  # entry already written and intent was already fsynced
+
+        autofill_link = ""
+        try:
+            import keygate_web as _web
+            autofill_link = _web.url_for(res["alias"])
+        except Exception:
+            autofill_link = ""
+
+        out = {
+            "success": True,
+            "created": bool(res.get("created")),
+            "rotated": bool(res.get("rotated")),
+            "alias": res["alias"],
+            "origin": res["origin"],
+            "identifier": res["identifier"],
+            "generated": True,
+            "length": res["length"],
+            "entry_path": res["entry_path"],
+            "indexed": True,
+            "autofill_enabled": False,
+            "audit": action,
+            "next": "keygate_request_fill(alias, origin)",
+        }
+        if autofill_link:
+            out["autofill_link"] = autofill_link
+        return out
+
+    def h_credential_add(params, **kw):
+        del kw
+        return json.dumps(_run_credential_add(params, via="keygate_credential_add"))
+
     def h_add(params, **kw):
-        del params, kw
-        return json.dumps({"success": False, "error_type": "policy_blocked",
-                           "error": ("Adding credentials from chat is disabled: passwords must never "
-                                     "travel through chat history. Add the copy in your local KeePassXC "
-                                     "and sync the .kdbx via keygate-sync web or keygate-push/pull (croc).")})
+        del kw
+        res = _run_credential_add(params, via="keygate_alias_add")
+        res["deprecated"] = True
+        res["replacement"] = "keygate_credential_add"
+        return json.dumps(res)
+
+    _CREATE_SCHEMA_PROPS = {
+        "alias": {"type": "string",
+                  "description": "Opaque title/alias, e.g. internet-agent-1 (no '/' separators)"},
+        "origin": {"type": "string",
+                   "description": "Exact login URL (https://...)"},
+        "username": {"type": "string",
+                     "description": "Account username/email (optional if default_email is configured in keygate-sync web)"},
+        "group": {"type": "string",
+                  "description": "Optional KeePass group path inside hermes.kdbx"},
+        "length": {"type": "integer",
+                   "description": "Generated password length (16-64, default 24)"},
+        "rotate": {"type": "boolean",
+                   "description": "Regenerate password if alias already exists (always requires explicit approval)"},
+    }
+
+    ctx.register_tool(
+        name="keygate_credential_add",
+        toolset="keygate",
+        schema={"name": "keygate_credential_add",
+                "description": ("Create a new login entry in hermes.kdbx with a strong password "
+                                "generated server-side by keepassxc-cli (never seen by the model "
+                                "or chat). Respects the keygate-sync web policy (ask/auto/disabled) "
+                                "and uses the configured default_email when username is omitted. "
+                                "Updates keygate-index.json and returns metadata only. "
+                                "NEVER pass a password parameter."),
+                "parameters": {"type": "object",
+                               "properties": _CREATE_SCHEMA_PROPS,
+                               "required": ["alias", "origin"]}},
+        handler=h_credential_add)
 
     ctx.register_tool(
         name="keygate_alias_add",
         toolset="keygate",
         schema={"name": "keygate_alias_add",
-                "description": "ALWAYS REFUSED by policy. Credentials are never created from chat.",
-                "parameters": {"type": "object", "properties": {}, "required": []}},
+                "description": ("Deprecated alias for keygate_credential_add. Creates a login entry "
+                                "with a server-side generated password (never accepts passwords)."),
+                "parameters": {"type": "object",
+                               "properties": _CREATE_SCHEMA_PROPS,
+                               "required": ["alias", "origin"]}},
         handler=h_add)
 
     # ---- keygate_import: mirror ONE operative copy into the native vault ----

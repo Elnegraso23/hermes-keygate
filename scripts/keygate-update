@@ -78,6 +78,12 @@ for rel in ("__init__.py", "keygate_lib.py", "sync/keygate_sync.py"):
     ast.parse((repo / rel).read_text(encoding="utf-8"))
 PY
 cp "$REPO/__init__.py" "$REPO/keygate_lib.py" "$REPO/plugin.yaml" "$DEST/"
+for opt in keygate_web.py keygate_vault.py; do
+  [ -f "$REPO/$opt" ] && cp "$REPO/$opt" "$DEST/$opt"
+done
+mkdir -p "$DEST/sync"
+cp "$REPO/sync/keygate_sync.py" "$DEST/sync/keygate_sync.py"
+chmod +x "$DEST/sync/keygate_sync.py"
 # Los skills son instrucciones que el agente lee: sin ellos el plugin queda
 # mudo (register() no los encuentra). Se reinstalan siempre, completos.
 rm -rf "$DEST/skills"

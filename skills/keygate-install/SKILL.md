@@ -13,9 +13,10 @@ platforms: [linux, macos, windows]
 >    No preguntes si ejecutarlo: EJECÚTALO y pega su salida.
 > 2. Ese script hace TODO: repo, plugin + `skills/`, vault, config, sync vivo.
 > 3. **NO des comandos manuales de `keepassxc-cli add -p`** (los passwords nunca
->    entran al chat, ni de mentira) y **NO ofrezcas `keygate_alias_add`**
->    (está bloqueado por política). Las credenciales van solo por la web o
->    KeePassXC.
+>    entran al chat, ni de mentira). Para cuentas nuevas con contraseña
+>    generada server-side existe `keygate_credential_add` (con aprobación o
+>    política configurada en `:8472`, sin pasar passwords); para contraseñas
+>    existentes usa la web `:8472` o KeePassXC.
 > 4. **La primera credencial es por la página http://127.0.0.1:8472** —
 >    que el script deja viva. Menciona esa URL en tu primer mensaje, siempre.
 > 5. Nunca edites `~/.hermes/config.yaml` a mano: el script usa
@@ -105,7 +106,10 @@ solo handles. Detalle completo en el README (sección del bug de socket).
 
 ## Reglas duras
 
-- `keygate_alias_add` SIEMPRE se rehusa. Credenciales: KeePassXC o web.
+- `keygate_credential_add` (y el wrapper deprecado `keygate_alias_add`) solo
+  crea contraseñas generadas server-side (nunca acepta passwords por chat) y
+  respeta la política configurada en `:8472`. Contraseñas existentes: web `:8472`
+  o KeePassXC.
 - Nunca `execute_code`/`curl` con credenciales. Nunca escribas un password.
 - Fill con origen distinto al pedido: PARA y avisa (guardia anti-phishing).
 - `.key` jamás viaja (ni sync, ni croc, ni chat).

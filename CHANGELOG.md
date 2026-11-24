@@ -4,7 +4,25 @@ Mientras la versión sea `0.x`: cada release puede romper compatibilidad
 (nombres de tools, formato de config, flujo de auth). Actualiza con
 `scripts/keygate-update` y reinstala skills siempre (el updater ya lo hace).
 
-## Sin publicar — rediseño de la página de alias
+## 0.8.0 — 2026-11-24 — creación controlada de credenciales y rediseño web
+- **Creación de credenciales sin exponer secretos (`keygate_credential_add`)**:
+  - `keygate_lib.add_entry()`: escritura atómica con `flock` junto al `.kdbx`,
+    staging en el mismo filesystem (evita `EXDEV`), verificación anti-wipe,
+    backup rotado (`keep=5`), permisos `0600` y generación server-side vía
+    `keepassxc-cli add/edit -g -L 24 -l -U -n -s --every-group`.
+  - Tool `keygate_credential_add` (con `keygate_alias_add` como wrapper
+    deprecado): nunca acepta contraseñas en parámetros (`policy_blocked`),
+    actualiza `keygate-index.json`, audita `strict=True` y devuelve solo
+    metadatos + link de `:8790` (sin autofill automático). Rotación
+    (`rotate=true`) exige coincidencia exacta de `origin` y aprobación aparte.
+  - **Web `:8472` (`sync/keygate_sync.py`)**:
+    - Tarjeta **Creación de cuentas por Hermes** (`GET/POST /api/create-policy`):
+      switch `ask` (pedir aprobación) / `auto` (sin aprobación) /
+      `disabled`, más **correo por defecto** para cuentas nuevas.
+    - Tarjeta **Agregar credencial (web)** (`POST /api/entry`) para modo
+      generado o contraseña existente (fuera del chat) + revelación one-shot
+      (`POST /api/entry/reveal`, TTL 120 s, `Cache-Control: no-store`, auditada).
+    - `POST /api/upload` serializado con el mismo `flock` del DB.
 - **`keygate_web.py` (:8790)**: rediseño visual completo. No cambia auth, toggle
   ni el modelo de datos; la página sigue sin ejecutar JavaScript.
   - Modo claro/oscuro real con `color-scheme` + tokens `oklch` y `light-dark()`

@@ -366,5 +366,21 @@ print('doc-ok', d['kxc_version'])" 2>&1)
 echo "$out" | grep -q "doc-ok" && ok "H10: doctor_check reporta permisos OK y versión" \
   || bad "H10 doctor_check" "$out"
 
+# --- 13. add_entry + create-policy en home fresco ---
+out=$(PYTHONPATH="$REPO" python3 -c "
+import json, pathlib, keygate_lib as kg
+db = '$TMP/Documentos/hermes.kdbx'
+kf = '$TMP/.keepass-agent.key'
+home = pathlib.Path('$TMP/h13/.hermes')
+pol, err = kg.set_create_policy(home, mode='ask', default_email='hermes@example.com')
+assert err is None and pol['mode'] == 'ask' and pol['default_email'] == 'hermes@example.com', (pol, err)
+r = kg.add_entry(db, kf, alias='selftest-acct-1', origin='https://example.com/login', username='hermes@example.com')
+assert r['success'] is True and r['created'] is True, r
+pw = kg.show_field(db, kf, 'selftest-acct-1', 'password')
+assert pw and len(pw) == 24 and pw not in json.dumps(r)
+print('add-entry-ok')" 2>&1)
+echo "$out" | grep -q "add-entry-ok" && ok "add_entry crea credencial server-side sin filtrar secreto + create-policy" \
+  || bad "add_entry en home fresco" "$out"
+
 echo "== selftest: $pass PASS, $fail FAIL =="
 [ "$fail" = 0 ] || exit 1
